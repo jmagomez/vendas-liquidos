@@ -18,7 +18,7 @@ jobs:
         id: mail
         env:
           MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
-          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD_ANP }}
         run: |
           if [ -n "$MAIL_USERNAME" ] && [ -n "$MAIL_PASSWORD" ]; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
@@ -81,7 +81,7 @@ jobs:
           server_port: 465
           secure: true
           username: ${{ secrets.MAIL_USERNAME }}
-          password: ${{ secrets.MAIL_PASSWORD }}
+          password: ${{ secrets.MAIL_PASSWORD_ANP }}
           subject: "Vendas ANP ${{ steps.resumo.outputs.mes }}: ${{ steps.resumo.outputs.vol }} mil m³ (${{ steps.resumo.outputs.var }}% no mês) — dashboard atualizado"
           to: jmagomez@gmail.com
           from: "Vendas Líquidos ANP <${{ secrets.MAIL_USERNAME }}>"
@@ -103,7 +103,7 @@ jobs:
           server_port: 465
           secure: true
           username: ${{ secrets.MAIL_USERNAME }}
-          password: ${{ secrets.MAIL_PASSWORD }}
+          password: ${{ secrets.MAIL_PASSWORD_ANP }}
           subject: "⚠️ Rotina do dashboard de vendas ANP falhou (run ${{ github.run_number }})"
           to: jmagomez@gmail.com
           from: "Vendas Líquidos ANP <${{ secrets.MAIL_USERNAME }}>"
