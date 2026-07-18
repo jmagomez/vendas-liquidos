@@ -1,0 +1,113 @@
+name: Atualiza dashboard de vendas ANP
+
+on:
+  schedule:
+    - cron: "0 12 5 * *"   # dia 5 de cada mês, 12:00 UTC (9h em Brasília)
+  workflow_dispatch: {}     # permite rodar manualmente na aba Actions
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verifica secrets de e-mail
+        id: mail
+        env:
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+        run: |
+          if [ -n "$MAIL_USERNAME" ] && [ -n "$MAIL_PASSWORD" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Secrets MAIL_USERNAME/MAIL_PASSWORD ausentes — e-mails não serão enviados."
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Atualiza dados
+        run: |
+          pip install requests
+          python scripts/update_dashboard.py
+
+      - name: Commita se houver mudança
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data.js
+          git diff --cached --quiet || git commit -m "Atualiza dados de vendas (rotina mensal)"
+          git push
+
+      - name: Extrai resumo para o e-mail
+        id: resumo
+        run: |
+          python - << 'PY' >> "$GITHUB_OUTPUT"
+          import json
+          raw = open('data.js', encoding='utf-8').read().strip()
+          d = json.loads(raw.removeprefix('window.VENDAS = ').rstrip(';\n'))
+          nm = len(d['months'])
+          by_month = [0.0] * nm
+          by_comp_last = {}
+          rows = d['rows']
+          for i in range(0, len(rows), 5):
+              m, c, q = rows[i], rows[i+1], rows[i+4] / 10000
+              by_month[m] += q
+              if m == nm - 1:
+                  by_comp_last[c] = by_comp_last.get(c, 0.0) + q
+          ult, ant = by_month[-1], by_month[-2] if nm > 1 else 0.0
+          var = (ult / ant - 1) * 100 if ant else 0.0
+          top = max(by_comp_last, key=by_comp_last.get)
+          share = by_comp_last[top] / ult * 100 if ult else 0.0
+          print(f"mes={d['months'][-1]}")
+          print(f"vol={ult:,.0f}".replace(',', '.'))
+          print(f"var={var:+.1f}")
+          print(f"top_comp={d['comps'][top]}")
+          print(f"top_share={share:.1f}")
+          print(f"periodo={d['months'][0]} a {d['months'][-1]}")
+          PY
+
+      - name: Envia e-mail com o dashboard
+        if: success() && steps.mail.outputs.ok == 'true'
+        uses: dawidd6/action-send-mail@v6
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "Vendas ANP ${{ steps.resumo.outputs.mes }}: ${{ steps.resumo.outputs.vol }} mil m³ (${{ steps.resumo.outputs.var }}% no mês) — dashboard atualizado"
+          to: jmagomez@gmail.com
+          from: "Vendas Líquidos ANP <${{ secrets.MAIL_USERNAME }}>"
+          html_body: |
+            <h2>Dashboard de vendas de combustíveis líquidos atualizado</h2>
+            <p>Dados da ANP até <b>${{ steps.resumo.outputs.mes }}</b> (período ${{ steps.resumo.outputs.periodo }}):</p>
+            <ul>
+              <li>Volume no último mês: <b>${{ steps.resumo.outputs.vol }} mil m³</b> (${{ steps.resumo.outputs.var }}% vs mês anterior)</li>
+              <li>Líder no mês: <b>${{ steps.resumo.outputs.top_comp }}</b> (${{ steps.resumo.outputs.top_share }}% de participação)</li>
+            </ul>
+            <p><a href="https://jmagomez.github.io/vendas-liquidos/">Abrir o dashboard completo</a> (vendas mensais com filtros por companhia, estado e tipo de consumidor + participação por companhia)</p>
+            <p style="color:#888;font-size:12px">Rotina mensal automática (dia 5) via GitHub Actions · dados abertos da ANP</p>
+
+      - name: Notifica falha por e-mail
+        if: failure() && steps.mail.outputs.ok == 'true'
+        uses: dawidd6/action-send-mail@v6
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "⚠️ Rotina do dashboard de vendas ANP falhou (run ${{ github.run_number }})"
+          to: jmagomez@gmail.com
+          from: "Vendas Líquidos ANP <${{ secrets.MAIL_USERNAME }}>"
+          body: |
+            A rotina mensal do dashboard de vendas ANP falhou.
+
+            Log completo: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
