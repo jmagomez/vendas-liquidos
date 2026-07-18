@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vendas de Combustíveis Líquidos — Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="data.js"></script>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --border:#30363d; --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --gold:#d29922; --up:#3fb950; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; padding:24px; }
+  .container { max-width:1100px; margin:0 auto; }
+  header { display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+  h1 { font-size:1.4rem; } h1 .tick { color:var(--accent); }
+  .period { color:var(--muted); font-size:.85rem; }
+  .filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin-bottom:16px; }
+  .filter label { display:block; color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px; }
+  .filter select { width:100%; background:var(--card); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:9px 10px; font-size:.9rem; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
+  .card .label { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
+  .card .value { font-size:1.25rem; font-weight:600; margin-top:4px; }
+  .card .sub { color:var(--muted); font-size:.73rem; margin-top:2px; }
+  .panel { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:18px; margin-bottom:16px; }
+  .panel h2 { font-size:1rem; color:var(--muted); font-weight:500; margin-bottom:4px; }
+  .panel .note { color:var(--muted); font-size:.73rem; margin-bottom:10px; }
+  footer { color:var(--muted); font-size:.78rem; text-align:center; margin-top:24px; }
+  .chart-box { position:relative; width:100%; }
+  .chart-box.h-md { height:340px; }
+  .chart-box.h-pie { height:380px; }
+  @media (max-width:640px) {
+    body { padding:12px; }
+    .panel { padding:12px; }
+    h1 { font-size:1.1rem; }
+    .cards { grid-template-columns:repeat(2,1fr); gap:8px; }
+    .card { padding:10px 12px; }
+    .card .value { font-size:1.02rem; }
+    .chart-box.h-md { height:280px; }
+    .chart-box.h-pie { height:340px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1><span class="tick">Combustíveis Líquidos</span> — Vendas por distribuidora</h1>
+    <span class="period" id="periodTxt"></span>
+  </header>
+
+  <div class="filters">
+    <div class="filter"><label for="fComp">Companhia</label><select id="fComp"></select></div>
+    <div class="filter"><label for="fUf">Estado (UF destino)</label><select id="fUf"></select></div>
+    <div class="filter"><label for="fMkt">Tipo de consumidor</label><select id="fMkt"></select></div>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="label">Volume total</div><div class="value" id="cTot"></div><div class="sub">mil m³ no período filtrado</div></div>
+    <div class="card"><div class="label">Média mensal</div><div class="value" id="cAvg"></div><div class="sub">mil m³ por mês</div></div>
+    <div class="card"><div class="label">Melhor mês</div><div class="value" id="cBest"></div><div class="sub" id="cBestSub"></div></div>
+    <div class="card"><div class="label">Companhias ativas</div><div class="value" id="cComp"></div><div class="sub" id="cCompSub"></div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Vendas mensais (mil m³)</h2>
+    <div class="note" id="chartNote"></div>
+    <div class="chart-box h-md"><canvas id="monthChart"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>Participação por companhia</h2>
+    <div class="note">Top 12 companhias + demais agregadas · respeita filtros de estado e tipo de consumidor (não o de companhia)</div>
+    <div class="chart-box h-pie"><canvas id="pieChart"></canvas></div>
+  </div>
+
+  <footer id="footerTxt"></footer>
+</div>
+<script>
+const D = window.VENDAS;
+const R = D.rows, NR = R.length;
+const el = id => document.getElementById(id);
+const nf = new Intl.NumberFormat('pt-BR', {maximumFractionDigits:0});
+const nf1 = new Intl.NumberFormat('pt-BR', {maximumFractionDigits:1});
+const MOBILE = window.matchMedia('(max-width:640px)').matches;
+if (MOBILE) Chart.defaults.font.size = 10;
+Chart.defaults.color='#8b949e'; Chart.defaults.borderColor='rgba(139,148,158,.15)';
+
+el('periodTxt').textContent = `${D.months[0]} a ${D.months[D.months.length-1]} · fonte: ANP`;
+el('footerTxt').textContent = `Dados de vendas de combustíveis líquidos por agente regulado (ANP) · volumes em mil m³ · agregado por mês, companhia, UF de destino e mercado destinatário`;
+
+// ===== filtros =====
+function fillSelect(id, items, allLabel){
+  const s = el(id);
+  s.innerHTML = `<option value="-1">${allLabel}</option>` + items.map((v,i)=>`<option value="${i}">${v}</option>`).join('');
+}
+fillSelect('fComp', D.comps, 'Todas as companhias');
+fillSelect('fUf', D.ufs, 'Todos os estados');
+fillSelect('fMkt', D.mkts, 'Todos os tipos');
+
+// ===== agregação =====
+function aggregate(){
+  const fc = +el('fComp').value, fu = +el('fUf').value, fk = +el('fMkt').value;
+  const byMonth = new Float64Array(D.months.length);
+  const byCompPie = new Float64Array(D.comps.length); // ignora filtro de companhia
+  const compSet = new Set();
+  let total = 0;
+  for (let i=0;i<NR;i+=5){
+    const m=R[i], c=R[i+1], u=R[i+2], k=R[i+3], q=R[i+4]/10000;
+    if (fu!==-1 && u!==fu) continue;
+    if (fk!==-1 && k!==fk) continue;
+    byCompPie[c] += q;
+    if (fc!==-1 && c!==fc) continue;
+    byMonth[m] += q;
+    total += q;
+    compSet.add(c);
+  }
+  return {byMonth, byCompPie, total, nComp: compSet.size, fc};
+}
+
+// ===== charts =====
+const PIE_COLORS = ['#58a6ff','#3fb950','#d29922','#f85149','#bc8cff','#39c5cf','#ff9bce','#9ece6a','#e0af68','#7aa2f7','#f7768e','#73daca','#8b949e'];
+
+const monthChart = new Chart(el('monthChart'), {
+  type:'bar',
+  data:{ labels:D.months, datasets:[{ label:'Volume (mil m³)', data:[], backgroundColor:'rgba(88,166,255,.55)', borderRadius:2 }] },
+  options:{ responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>nf1.format(c.raw)+' mil m³'}} },
+    scales:{ x:{ticks:{maxTicksLimit:MOBILE?6:14}}, y:{ticks:{callback:v=>nf.format(v)}} } }
+});
+
+const pieChart = new Chart(el('pieChart'), {
+  type:'doughnut',
+  data:{ labels:[], datasets:[{ data:[], backgroundColor:PIE_COLORS, borderColor:'#161b22', borderWidth:2 }] },
+  options:{ responsive:true, maintainAspectRatio:false,
+    plugins:{
+      legend:{ position:MOBILE?'bottom':'right', labels:{boxWidth:12, font:{size:MOBILE?9:11}} },
+      tooltip:{callbacks:{label:c=>{
+        const tot = c.dataset.data.reduce((a,b)=>a+b,0);
+        return `${c.label}: ${nf1.format(c.raw)} mil m³ (${(c.raw/tot*100).toFixed(1)}%)`;
+      }}}
+    } }
+});
+
+function shortName(name){
+  return name.length>28 ? name.slice(0,26)+'…' : name;
+}
+
+function refresh(){
+  const {byMonth, byCompPie, total, nComp, fc} = aggregate();
+
+  // cards
+  el('cTot').textContent = nf.format(total);
+  const activeMonths = byMonth.reduce((a,v)=>a+(v>0?1:0),0) || 1;
+  el('cAvg').textContent = nf.format(total/activeMonths);
+  let bi = 0; for (let i=1;i<byMonth.length;i++) if (byMonth[i]>byMonth[bi]) bi=i;
+  el('cBest').textContent = total>0 ? D.months[bi] : '—';
+  el('cBestSub').textContent = total>0 ? nf.format(byMonth[bi])+' mil m³' : '';
+  if (fc!==-1){
+    const pieTot = byCompPie.reduce((a,b)=>a+b,0);
+    el('cComp').textContent = pieTot>0 ? (byCompPie[fc]/pieTot*100).toFixed(1)+'%' : '—';
+    el('cCompSub').textContent = 'participação da companhia no recorte';
+    document.querySelector('.card:last-child .label').textContent = 'Participação';
+  } else {
+    el('cComp').textContent = nf.format(nComp);
+    el('cCompSub').textContent = 'com vendas no recorte';
+    document.querySelector('.card:last-child .label').textContent = 'Companhias ativas';
+  }
+
+  // gráfico mensal
+  monthChart.data.datasets[0].data = Array.from(byMonth);
+  const parts = [];
+  if (fc!==-1) parts.push(D.comps[fc]);
+  if (+el('fUf').value!==-1) parts.push('UF ' + D.ufs[+el('fUf').value]);
+  if (+el('fMkt').value!==-1) parts.push(D.mkts[+el('fMkt').value]);
+  el('chartNote').textContent = parts.length ? 'Filtro: ' + parts.join(' · ') : 'Todas as companhias, estados e tipos de consumidor';
+  monthChart.update();
+
+  // pizza (top 12 + outras)
+  const idx = Array.from(byCompPie).map((v,i)=>[v,i]).filter(x=>x[0]>0).sort((a,b)=>b[0]-a[0]);
+  const top = idx.slice(0,12);
+  const rest = idx.slice(12).reduce((a,x)=>a+x[0],0);
+  pieChart.data.labels = top.map(x=>shortName(D.comps[x[1]])).concat(rest>0?['Outras ('+(idx.length-top.length)+')']:[]);
+  pieChart.data.datasets[0].data = top.map(x=>x[0]).concat(rest>0?[rest]:[]);
+  pieChart.update();
+}
+
+el('fComp').addEventListener('change', refresh);
+el('fUf').addEventListener('change', refresh);
+el('fMkt').addEventListener('change', refresh);
+refresh();
+</script>
+</body>
+</html>
