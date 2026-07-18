@@ -69,7 +69,7 @@
 
   <div class="panel">
     <h2>Participação por companhia</h2>
-    <div class="note">Top 12 companhias + demais agregadas · respeita filtros de estado e tipo de consumidor (não o de companhia)</div>
+    <div class="note">4 maiores em destaque · top 12 companhias + demais agregadas · respeita filtros de estado e tipo de consumidor (não o de companhia)</div>
     <div class="chart-box h-pie"><canvas id="pieChart"></canvas></div>
   </div>
 
@@ -118,7 +118,11 @@ function aggregate(){
 }
 
 // ===== charts =====
-const PIE_COLORS = ['#58a6ff','#3fb950','#d29922','#f85149','#bc8cff','#39c5cf','#ff9bce','#9ece6a','#e0af68','#7aa2f7','#f7768e','#73daca','#8b949e'];
+// 4 maiores em destaque (cores vivas + fatia deslocada); demais esmaecidas
+const PIE_TOP = ['#58a6ff','#3fb950','#d29922','#f85149'];
+const PIE_REST = ['rgba(188,140,255,.45)','rgba(57,197,207,.45)','rgba(255,155,206,.45)','rgba(158,206,106,.45)','rgba(224,175,104,.45)','rgba(122,162,247,.45)','rgba(247,118,142,.45)','rgba(115,218,202,.45)'];
+const PIE_OUTRAS = 'rgba(139,148,158,.35)';
+const TOP_DESTAQUE = 4;
 
 const monthChart = new Chart(el('monthChart'), {
   type:'bar',
@@ -130,7 +134,7 @@ const monthChart = new Chart(el('monthChart'), {
 
 const pieChart = new Chart(el('pieChart'), {
   type:'doughnut',
-  data:{ labels:[], datasets:[{ data:[], backgroundColor:PIE_COLORS, borderColor:'#161b22', borderWidth:2 }] },
+  data:{ labels:[], datasets:[{ data:[], backgroundColor:[], offset:[], hoverOffset:14, borderColor:'#161b22', borderWidth:2 }] },
   options:{ responsive:true, maintainAspectRatio:false,
     plugins:{
       legend:{ position:MOBILE?'bottom':'right', labels:{boxWidth:12, font:{size:MOBILE?9:11}} },
@@ -173,14 +177,21 @@ function refresh(){
   if (+el('fUf').value!==-1) parts.push('UF ' + D.ufs[+el('fUf').value]);
   if (+el('fMkt').value!==-1) parts.push(D.mkts[+el('fMkt').value]);
   el('chartNote').textContent = parts.length ? 'Filtro: ' + parts.join(' · ') : 'Todas as companhias, estados e tipos de consumidor';
+  // sem filtros, todos os meses ficam acima de 7.000 mil m³: eixo parte de 7.000
+  // para dar zoom na variação; com filtros, volta ao automático.
+  monthChart.options.scales.y.min = parts.length ? undefined : 7000;
   monthChart.update();
 
-  // pizza (top 12 + outras)
+  // pizza (top 12 + outras) — 4 maiores em destaque
   const idx = Array.from(byCompPie).map((v,i)=>[v,i]).filter(x=>x[0]>0).sort((a,b)=>b[0]-a[0]);
   const top = idx.slice(0,12);
   const rest = idx.slice(12).reduce((a,x)=>a+x[0],0);
+  const nFatias = top.length + (rest>0 ? 1 : 0);
   pieChart.data.labels = top.map(x=>shortName(D.comps[x[1]])).concat(rest>0?['Outras ('+(idx.length-top.length)+')']:[]);
   pieChart.data.datasets[0].data = top.map(x=>x[0]).concat(rest>0?[rest]:[]);
+  pieChart.data.datasets[0].backgroundColor = Array.from({length:nFatias}, (_,i)=>
+    i < TOP_DESTAQUE ? PIE_TOP[i] : (rest>0 && i===nFatias-1 ? PIE_OUTRAS : PIE_REST[(i-TOP_DESTAQUE)%PIE_REST.length]));
+  pieChart.data.datasets[0].offset = Array.from({length:nFatias}, (_,i)=> i < TOP_DESTAQUE ? 22 : 0);
   pieChart.update();
 }
 
