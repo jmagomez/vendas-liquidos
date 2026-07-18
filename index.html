@@ -25,6 +25,11 @@
   .panel { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:18px; margin-bottom:16px; }
   .panel h2 { font-size:1rem; color:var(--muted); font-weight:500; margin-bottom:4px; }
   .panel .note { color:var(--muted); font-size:.73rem; margin-bottom:10px; }
+  .ytd { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  .ytd .box { background:rgba(88,166,255,.06); border:1px solid var(--border); border-radius:8px; padding:8px 14px; min-width:140px; }
+  .ytd .box .label { color:var(--muted); font-size:.68rem; text-transform:uppercase; letter-spacing:.05em; }
+  .ytd .box .value { font-size:1.05rem; font-weight:600; margin-top:2px; }
+  .ytd .box .sub { color:var(--muted); font-size:.7rem; margin-top:1px; }
   footer { color:var(--muted); font-size:.78rem; text-align:center; margin-top:24px; }
   .chart-box { position:relative; width:100%; }
   .chart-box.h-md { height:340px; }
@@ -64,6 +69,7 @@
   <div class="panel">
     <h2>Vendas mensais (mil m³)</h2>
     <div class="note" id="chartNote"></div>
+    <div class="ytd" id="ytdBox"></div>
     <div class="chart-box h-md"><canvas id="monthChart"></canvas></div>
   </div>
 
@@ -132,8 +138,40 @@ const monthChart = new Chart(el('monthChart'), {
     scales:{ x:{ticks:{maxTicksLimit:MOBILE?6:14}}, y:{ticks:{callback:v=>nf.format(v)}} } }
 });
 
+// rótulos fixos (nome + %) nas 4 maiores fatias
+const pieLabels = {
+  id: 'pieLabels',
+  afterDatasetsDraw(chart){
+    const meta = chart.getDatasetMeta(0);
+    const data = chart.data.datasets[0].data;
+    const tot = data.reduce((a,b)=>a+b,0);
+    if (!tot) return;
+    const {ctx} = chart;
+    const fs = MOBILE ? 9 : 11;
+    for (let i=0; i<Math.min(TOP_DESTAQUE, meta.data.length); i++){
+      const arc = meta.data[i];
+      if (!arc) continue;
+      const ang = (arc.startAngle + arc.endAngle) / 2;
+      const pct = (data[i]/tot*100).toFixed(1) + '%';
+      const nome = String(chart.data.labels[i]).split(' ')[0];
+      const pequena = (arc.endAngle - arc.startAngle) < 0.35; // fatia estreita: rótulo do lado de fora
+      const r = pequena ? arc.outerRadius + (MOBILE?12:18) : (arc.innerRadius + arc.outerRadius) / 2;
+      const x = arc.x + Math.cos(ang)*r, y = arc.y + Math.sin(ang)*r;
+      ctx.save();
+      ctx.textAlign = pequena ? (Math.cos(ang) >= 0 ? 'left' : 'right') : 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `bold ${fs}px 'Segoe UI',system-ui,sans-serif`;
+      ctx.fillStyle = pequena ? '#e6edf3' : '#0d1117';
+      ctx.fillText(nome, x, y - fs*0.65);
+      ctx.fillText(pct, x, y + fs*0.65);
+      ctx.restore();
+    }
+  }
+};
+
 const pieChart = new Chart(el('pieChart'), {
   type:'doughnut',
+  plugins:[pieLabels],
   data:{ labels:[], datasets:[{ data:[], backgroundColor:[], offset:[], hoverOffset:14, borderColor:'#161b22', borderWidth:2 }] },
   options:{ responsive:true, maintainAspectRatio:false,
     plugins:{
@@ -181,6 +219,24 @@ function refresh(){
   // para dar zoom na variação; com filtros, volta ao automático.
   monthChart.options.scales.y.min = parts.length ? undefined : 7000;
   monthChart.update();
+
+  // quadro: acumulado do ano atual x mesmo período do ano anterior
+  const anoAtual = +D.months[D.months.length-1].slice(0,4);
+  const mesFinal = +D.months[D.months.length-1].slice(5,7);
+  let acumAtual = 0, acumAnt = 0;
+  D.months.forEach((ym,i)=>{
+    const a = +ym.slice(0,4), m = +ym.slice(5,7);
+    if (m <= mesFinal){
+      if (a === anoAtual) acumAtual += byMonth[i];
+      else if (a === anoAtual-1) acumAnt += byMonth[i];
+    }
+  });
+  const varAc = acumAnt > 0 ? (acumAtual/acumAnt - 1) * 100 : null;
+  const mesNome = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][mesFinal-1];
+  el('ytdBox').innerHTML = `
+    <div class="box"><div class="label">Acumulado ${anoAtual} (jan–${mesNome})</div><div class="value">${nf.format(acumAtual)}</div><div class="sub">mil m³</div></div>
+    <div class="box"><div class="label">Acumulado ${anoAtual-1} (jan–${mesNome})</div><div class="value">${nf.format(acumAnt)}</div><div class="sub">mil m³</div></div>
+    <div class="box"><div class="label">Variação ${anoAtual} x ${anoAtual-1}</div><div class="value ${varAc===null?'':(varAc>=0?'up':'down')}">${varAc===null?'—':(varAc>=0?'+':'')+varAc.toFixed(1)+'%'}</div><div class="sub">mesmo período</div></div>`;
 
   // pizza (top 12 + outras) — 4 maiores em destaque
   const idx = Array.from(byCompPie).map((v,i)=>[v,i]).filter(x=>x[0]>0).sort((a,b)=>b[0]-a[0]);
