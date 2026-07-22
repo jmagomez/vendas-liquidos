@@ -1,0 +1,3 @@
+# Ferramentas de desenvolvimento (lint, format, testes)
+ruff>=0.6
+pytest>=8.0
