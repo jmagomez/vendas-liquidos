@@ -1,0 +1,45 @@
+# Adicionar como .github/workflows/ci.yml
+# Serve para: oil-gas-financial-dashboard, vendas-liquidos, projeto_bloomberg, resumo-focus-public
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "data/**"
+      - "docs/**"
+      - "output/**"
+  pull_request:
+    paths-ignore:
+      - "data/**"
+      - "docs/**"
+      - "output/**"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: |
+          [ -f requirements.txt ] && pip install -r requirements.txt || true
+          pip install -r requirements-dev.txt
+
+      - name: Lint (ruff) — informativo
+        continue-on-error: true
+        run: ruff check --output-format=github .
+
+      - name: Formatacao (ruff) — informativo
+        continue-on-error: true
+        run: ruff format --check .
+
+      - name: Testes (pytest)
+        run: pytest
