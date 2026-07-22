@@ -27,7 +27,7 @@ jobs:
             echo "::warning::Secrets MAIL_USERNAME/MAIL_PASSWORD ausentes — e-mails não serão enviados."
           fi
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
