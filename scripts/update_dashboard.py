@@ -64,15 +64,111 @@ def baixar():
     raise RuntimeError(f"ANP indisponível após {TENTATIVAS} tentativas ({ultima_falha})")
 
 
+# Posições das colunas usadas no CSV da ANP. O arquivo não tem cabeçalho
+# estável documentado, então lemos por índice — mas cada linha é validada
+# (ver `agregar`). Se a ANP inserir ou reordenar uma coluna, a validação
+# derruba a rotina em vez de gravar um data.js silenciosamente errado.
+COL_ANO, COL_MES, COL_COMP, COL_UF, COL_MKT, COL_QTD = 0, 1, 2, 9, 10, 11
+N_COLUNAS_MIN = 12
+
+ANO_MIN, ANO_MAX = 2000, 2100
+# Fração máxima de linhas descartadas antes de considerar que o layout mudou.
+TOLERANCIA_DESCARTE = 0.01
+
+
 def agregar(conteudo: bytes):
+    """Agrega por (ano-mês, companhia, UF de destino, mercado destinatário).
+
+    Cada linha é validada antes de entrar na soma. Sem isso, uma mudança de
+    layout da ANP (coluna nova, reordenação) produziria um data.js com números
+    errados e nenhum sinal de erro — o pior desfecho possível para um dashboard
+    que roda sozinho todo mês.
+    """
     agg = defaultdict(float)
     texto = io.TextIOWrapper(io.BytesIO(conteudo), encoding="latin-1")
     r = csv.reader(texto, delimiter=";")
-    next(r)  # cabeçalho
+
+    cabecalho = next(r, None)
+    if cabecalho is None:
+        raise RuntimeError("CSV da ANP veio vazio")
+    if len(cabecalho) < N_COLUNAS_MIN:
+        raise RuntimeError(
+            f"CSV da ANP tem {len(cabecalho)} colunas, esperado >= {N_COLUNAS_MIN}. "
+            f"Layout mudou? Cabeçalho: {cabecalho}"
+        )
+
+    total = descartadas = 0
+    motivos = defaultdict(int)
     for row in r:
-        ym = f"{row[0]}-{int(row[1]):02d}"
-        agg[(ym, row[2], row[9], row[10])] += float(row[11].replace(",", "."))
+        total += 1
+        if len(row) < N_COLUNAS_MIN:
+            descartadas += 1
+            motivos["colunas de menos"] += 1
+            continue
+        try:
+            ano = int(row[COL_ANO])
+            mes = int(row[COL_MES])
+            qtd = float(row[COL_QTD].replace(",", "."))
+        except ValueError:
+            descartadas += 1
+            motivos["campo não numérico"] += 1
+            continue
+        if not (ANO_MIN <= ano <= ANO_MAX):
+            descartadas += 1
+            motivos["ano fora da faixa"] += 1
+            continue
+        if not (1 <= mes <= 12):
+            descartadas += 1
+            motivos["mês fora de 1-12"] += 1
+            continue
+        agg[(f"{ano}-{mes:02d}", row[COL_COMP], row[COL_UF], row[COL_MKT])] += qtd
+
+    if not total:
+        raise RuntimeError("CSV da ANP não tem linhas de dados")
+    if descartadas > total * TOLERANCIA_DESCARTE:
+        raise RuntimeError(
+            f"{descartadas}/{total} linhas ({descartadas / total:.1%}) invalidas — "
+            f"o layout da ANP provavelmente mudou. Motivos: {dict(motivos)}"
+        )
+    if descartadas:
+        print(f"[update] {descartadas}/{total} linhas descartadas: {dict(motivos)}")
+    print(f"[update] {total} linhas lidas, {len(agg)} combinacoes")
     return agg
+
+
+def carregar_anterior():
+    """Lê o data.js atual, para comparar antes de sobrescrever."""
+    if not OUT.exists():
+        return None
+    try:
+        bruto = OUT.read_text(encoding="utf-8").strip()
+        return json.loads(bruto.removeprefix("window.VENDAS = ").rstrip(";\n"))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[update] aviso: nao consegui ler o data.js anterior ({exc})")
+        return None
+
+
+def conferir_contra_anterior(novo, anterior):
+    """Barra regressões silenciosas.
+
+    A ANP já publicou arquivo truncado. Sem esta checagem, um download parcial
+    sobrescreveria anos de histórico e a rotina terminaria com sucesso.
+    """
+    if not anterior:
+        return
+    meses_antes, meses_agora = len(anterior["months"]), len(novo["months"])
+    if meses_agora < meses_antes:
+        raise RuntimeError(
+            f"regressao: {meses_agora} meses no arquivo novo contra {meses_antes} no atual "
+            f"(ultimo antes: {anterior['months'][-1]}, agora: {novo['months'][-1]}). "
+            "Arquivo da ANP provavelmente veio truncado; data.js NAO foi alterado."
+        )
+    linhas_antes, linhas_agora = len(anterior["rows"]) // 5, len(novo["rows"]) // 5
+    if linhas_agora < linhas_antes * 0.95:
+        raise RuntimeError(
+            f"regressao: {linhas_agora} combinacoes contra {linhas_antes} no atual "
+            f"(queda de {1 - linhas_agora / linhas_antes:.1%}). data.js NAO foi alterado."
+        )
 
 
 def gerar_data_js(agg):
@@ -89,19 +185,24 @@ def gerar_data_js(agg):
         qi = round(q * 10000)  # mil m³ com 4 casas, como inteiro
         if qi:
             rows.extend([mi[ym], ci[c], ui[u], ki[k], qi])
-    data = {"months": months, "comps": comps, "ufs": ufs, "mkts": mkts,
+    return {"months": months, "comps": comps, "ufs": ufs, "mkts": mkts,
             "rows": rows,
             "updated": datetime.now(timezone.utc).strftime("%Y-%m-%d")}
+
+
+def escrever_data_js(data):
     OUT.write_text("window.VENDAS = " + json.dumps(data, ensure_ascii=False, separators=(",", ":")) + ";\n",
                    encoding="utf-8")
-    return data
 
 
 def main():
+    anterior = carregar_anterior()
     conteudo = baixar()
     print(f"[update] download ok ({len(conteudo)/1e6:.0f} MB)")
     agg = agregar(conteudo)
     data = gerar_data_js(agg)
+    conferir_contra_anterior(data, anterior)   # levanta antes de escrever
+    escrever_data_js(data)
     total = sum(agg.values())
     print(f"[update] {len(data['rows']) // 5} combinações | {data['months'][0]} a {data['months'][-1]} | "
           f"total {total:,.0f} mil m³ | data.js atualizado")
