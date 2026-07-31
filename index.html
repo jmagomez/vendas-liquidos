@@ -74,6 +74,12 @@
   </div>
 
   <div class="panel">
+    <h2>Evolução do mix por tipo de consumidor</h2>
+    <div class="note" id="mixNote"></div>
+    <div class="chart-box h-md"><canvas id="mixChart"></canvas></div>
+  </div>
+
+  <div class="panel">
     <h2>Participação por companhia</h2>
     <div class="note">4 maiores em destaque · top 12 companhias + demais agregadas · respeita filtros de estado e tipo de consumidor (não o de companhia)</div>
     <div class="chart-box h-pie"><canvas id="pieChart"></canvas></div>
@@ -121,6 +127,22 @@ function aggregate(){
     compSet.add(c);
   }
   return {byMonth, byCompPie, total, nComp: compSet.size, fc};
+}
+
+// Mix por tipo de consumidor ao longo do tempo. Respeita os filtros de companhia
+// e de UF, mas IGNORA o de tipo -- senao o grafico de composicao mostraria uma
+// unica faixa de 100%, que nao diz nada.
+function aggregateMix(){
+  const fc = +el('fComp').value, fu = +el('fUf').value;
+  const nm = D.months.length, nk = D.mkts.length;
+  const m = Array.from({length:nk}, () => new Float64Array(nm));
+  for (let i=0;i<NR;i+=5){
+    const mo=R[i], c=R[i+1], u=R[i+2], k=R[i+3], q=R[i+4]/10000;
+    if (fc!==-1 && c!==fc) continue;
+    if (fu!==-1 && u!==fu) continue;
+    m[k][mo] += q;
+  }
+  return m;
 }
 
 // ===== charts =====
@@ -182,6 +204,57 @@ const pieChart = new Chart(el('pieChart'), {
       }}}
     } }
 });
+
+// Area empilhada 100%: composicao ao longo do tempo. Linha nao serve aqui --
+// o que interessa e a participacao relativa, nao o nivel de cada faixa.
+const MIX_CORES = ['#58a6ff','#3fb950','#d29922','#f85149','#bc8cff'];
+const mixChart = new Chart(el('mixChart'), {
+  type:'line',
+  data:{ labels:D.months, datasets:[] },
+  options:{ responsive:true, maintainAspectRatio:false,
+    interaction:{mode:'index', intersect:false},
+    plugins:{
+      legend:{position:'bottom', labels:{boxWidth:12, font:{size:MOBILE?9:11}}},
+      tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${nf1.format(c.raw)}%`}}
+    },
+    elements:{point:{radius:0}},
+    scales:{
+      x:{ticks:{maxTicksLimit:MOBILE?6:14}},
+      y:{stacked:true, min:0, max:100, ticks:{callback:v=>v+'%'}}
+    } }
+});
+
+function refreshMix(){
+  const m = aggregateMix();
+  const nm = D.months.length;
+  // converte para participacao; mes sem venda no recorte fica nulo em vez de 0,
+  // senao o grafico desenha uma queda para zero que nao existe.
+  const tot = new Float64Array(nm);
+  for (let k=0;k<D.mkts.length;k++) for (let i=0;i<nm;i++) tot[i]+=m[k][i];
+  const ativos = [];
+  for (let k=0;k<D.mkts.length;k++) if (m[k].reduce((a,b)=>a+b,0) > 0) ativos.push(k);
+  mixChart.data.datasets = ativos.map((k,idx)=>({
+    label: D.mkts[k],
+    data: Array.from({length:nm}, (_,i)=> tot[i]>0 ? m[k][i]/tot[i]*100 : null),
+    backgroundColor: MIX_CORES[idx % MIX_CORES.length],
+    borderColor: MIX_CORES[idx % MIX_CORES.length],
+    borderWidth:1, fill:true, tension:.2, spanGaps:false,
+  }));
+  mixChart.update();
+
+  // le so as duas pontas da serie, para contextualizar sem afirmar tendencia
+  const nota = [];
+  const ini = tot.findIndex(v=>v>0);
+  const fim = nm-1-[...tot].reverse().findIndex(v=>v>0);
+  if (ini>=0 && fim>ini){
+    for (const k of ativos){
+      nota.push(`${D.mkts[k]}: ${nf1.format(m[k][ini]/tot[ini]*100)}% → ${nf1.format(m[k][fim]/tot[fim]*100)}%`);
+    }
+    el('mixNote').textContent = `Participação de cada tipo no volume do recorte · ${D.months[ini]} → ${D.months[fim]} · ` + nota.join(' · ');
+  } else {
+    el('mixNote').textContent = 'Sem dados no recorte selecionado.';
+  }
+}
 
 function shortName(name){
   return name.length>28 ? name.slice(0,26)+'…' : name;
@@ -249,6 +322,8 @@ function refresh(){
     i < TOP_DESTAQUE ? PIE_TOP[i] : (rest>0 && i===nFatias-1 ? PIE_OUTRAS : PIE_REST[(i-TOP_DESTAQUE)%PIE_REST.length]));
   pieChart.data.datasets[0].offset = Array.from({length:nFatias}, (_,i)=> i < TOP_DESTAQUE ? 22 : 0);
   pieChart.update();
+
+  refreshMix();
 }
 
 el('fComp').addEventListener('change', refresh);
