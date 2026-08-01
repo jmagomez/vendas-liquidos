@@ -57,7 +57,11 @@
     <div class="filter"><label for="fComp">Companhia</label><select id="fComp"></select></div>
     <div class="filter"><label for="fUf">Estado (UF destino)</label><select id="fUf"></select></div>
     <div class="filter"><label for="fMkt">Tipo de consumidor</label><select id="fMkt"></select></div>
+    <div class="filter"><label for="fIni">Período inicial</label><select id="fIni"></select></div>
+    <div class="filter"><label for="fFim">Período final</label><select id="fFim"></select></div>
+    <div class="filter"><label for="fMes">Mês (sazonalidade)</label><select id="fMes"></select></div>
   </div>
+  <div id="faixaVazia" class="note" style="display:none;background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.35);color:#f0a89f;padding:8px 12px;border-radius:8px;margin-bottom:16px"></div>
 
   <div class="cards">
     <div class="card"><div class="label">Volume total</div><div class="value" id="cTot"></div><div class="sub">mil m³ no período filtrado</div></div>
@@ -71,6 +75,12 @@
     <div class="note" id="chartNote"></div>
     <div class="ytd" id="ytdBox"></div>
     <div class="chart-box h-md"><canvas id="monthChart"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>Evolução do mix por tipo de consumidor</h2>
+    <div class="note" id="mixNote"></div>
+    <div class="chart-box h-md"><canvas id="mixChart"></canvas></div>
   </div>
 
   <div class="panel">
@@ -103,10 +113,49 @@ fillSelect('fComp', D.comps, 'Todas as companhias');
 fillSelect('fUf', D.ufs, 'Todos os estados');
 fillSelect('fMkt', D.mkts, 'Todos os tipos');
 
+// Periodo: dois seletores com os proprios meses da base. Nao ha opcao "todos"
+// porque o intervalo cheio (primeiro ao ultimo) ja e o padrao.
+const MESES_PT = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+function fillMeses(id, sel){
+  el(id).innerHTML = D.months.map((m,i)=>`<option value="${i}">${m}</option>`).join('');
+  el(id).value = sel;
+}
+fillMeses('fIni', 0);
+fillMeses('fFim', D.months.length-1);
+
+// Mes do calendario: recorta o mesmo mes em todos os anos, para comparar
+// sazonalidade. Complementa o intervalo em vez de duplicar.
+el('fMes').innerHTML = '<option value="-1">Todos os meses</option>' +
+  MESES_PT.map((m,i)=>`<option value="${i+1}">${m}</option>`).join('');
+
+// ===== recorte temporal =====
+// Tolera inversao: se o inicio vier depois do fim, os dois trocam de lugar em
+// vez de zerar a tela sem explicacao.
+function faixa(){
+  let a = +el('fIni').value, b = +el('fFim').value;
+  return a <= b ? [a,b] : [b,a];
+}
+
+function mesesAtivos(){
+  const [a,b] = faixa();
+  const mc = +el('fMes').value;
+  const ativos = new Uint8Array(D.months.length);
+  for (let i=a;i<=b;i++){
+    if (mc === -1 || (+D.months[i].slice(5,7)) === mc) ativos[i] = 1;
+  }
+  return ativos;
+}
+
 // ===== agregação =====
 function aggregate(){
   const fc = +el('fComp').value, fu = +el('fUf').value, fk = +el('fMkt').value;
+  const ativos = mesesAtivos();
   const byMonth = new Float64Array(D.months.length);
+  // Mesma agregacao SEM o recorte temporal. A comparacao "mesma janela 12 meses
+  // antes" precisa ler meses que, por definicao, estao fora do recorte; usar
+  // byMonth ali daria zero -- ou pior, uma soma parcial que parece valida.
+  // Os filtros de companhia, UF e tipo continuam valendo nas duas.
+  const byMonthAll = new Float64Array(D.months.length);
   const byCompPie = new Float64Array(D.comps.length); // ignora filtro de companhia
   const compSet = new Set();
   let total = 0;
@@ -114,13 +163,33 @@ function aggregate(){
     const m=R[i], c=R[i+1], u=R[i+2], k=R[i+3], q=R[i+4]/10000;
     if (fu!==-1 && u!==fu) continue;
     if (fk!==-1 && k!==fk) continue;
+    if (fc===-1 || c===fc) byMonthAll[m] += q;
+    if (!ativos[m]) continue;
     byCompPie[c] += q;
     if (fc!==-1 && c!==fc) continue;
     byMonth[m] += q;
     total += q;
     compSet.add(c);
   }
-  return {byMonth, byCompPie, total, nComp: compSet.size, fc};
+  return {byMonth, byMonthAll, byCompPie, total, nComp: compSet.size, fc};
+}
+
+// Mix por tipo de consumidor ao longo do tempo. Respeita os filtros de companhia
+// e de UF, mas IGNORA o de tipo -- senao o grafico de composicao mostraria uma
+// unica faixa de 100%, que nao diz nada.
+function aggregateMix(){
+  const fc = +el('fComp').value, fu = +el('fUf').value;
+  const nm = D.months.length, nk = D.mkts.length;
+  const ativos = mesesAtivos();
+  const m = Array.from({length:nk}, () => new Float64Array(nm));
+  for (let i=0;i<NR;i+=5){
+    const mo=R[i], c=R[i+1], u=R[i+2], k=R[i+3], q=R[i+4]/10000;
+    if (!ativos[mo]) continue;
+    if (fc!==-1 && c!==fc) continue;
+    if (fu!==-1 && u!==fu) continue;
+    m[k][mo] += q;
+  }
+  return m;
 }
 
 // ===== charts =====
@@ -183,12 +252,63 @@ const pieChart = new Chart(el('pieChart'), {
     } }
 });
 
+// Area empilhada 100%: composicao ao longo do tempo. Linha nao serve aqui --
+// o que interessa e a participacao relativa, nao o nivel de cada faixa.
+const MIX_CORES = ['#58a6ff','#3fb950','#d29922','#f85149','#bc8cff'];
+const mixChart = new Chart(el('mixChart'), {
+  type:'line',
+  data:{ labels:D.months, datasets:[] },
+  options:{ responsive:true, maintainAspectRatio:false,
+    interaction:{mode:'index', intersect:false},
+    plugins:{
+      legend:{position:'bottom', labels:{boxWidth:12, font:{size:MOBILE?9:11}}},
+      tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${nf1.format(c.raw)}%`}}
+    },
+    elements:{point:{radius:0}},
+    scales:{
+      x:{ticks:{maxTicksLimit:MOBILE?6:14}},
+      y:{stacked:true, min:0, max:100, ticks:{callback:v=>v+'%'}}
+    } }
+});
+
+function refreshMix(){
+  const m = aggregateMix();
+  const nm = D.months.length;
+  // converte para participacao; mes sem venda no recorte fica nulo em vez de 0,
+  // senao o grafico desenha uma queda para zero que nao existe.
+  const tot = new Float64Array(nm);
+  for (let k=0;k<D.mkts.length;k++) for (let i=0;i<nm;i++) tot[i]+=m[k][i];
+  const ativos = [];
+  for (let k=0;k<D.mkts.length;k++) if (m[k].reduce((a,b)=>a+b,0) > 0) ativos.push(k);
+  mixChart.data.datasets = ativos.map((k,idx)=>({
+    label: D.mkts[k],
+    data: Array.from({length:nm}, (_,i)=> tot[i]>0 ? m[k][i]/tot[i]*100 : null),
+    backgroundColor: MIX_CORES[idx % MIX_CORES.length],
+    borderColor: MIX_CORES[idx % MIX_CORES.length],
+    borderWidth:1, fill:true, tension:.2, spanGaps:false,
+  }));
+  mixChart.update();
+
+  // le so as duas pontas da serie, para contextualizar sem afirmar tendencia
+  const nota = [];
+  const ini = tot.findIndex(v=>v>0);
+  const fim = nm-1-[...tot].reverse().findIndex(v=>v>0);
+  if (ini>=0 && fim>ini){
+    for (const k of ativos){
+      nota.push(`${D.mkts[k]}: ${nf1.format(m[k][ini]/tot[ini]*100)}% → ${nf1.format(m[k][fim]/tot[fim]*100)}%`);
+    }
+    el('mixNote').textContent = `Participação de cada tipo no volume do recorte · ${D.months[ini]} → ${D.months[fim]} · ` + nota.join(' · ');
+  } else {
+    el('mixNote').textContent = 'Sem dados no recorte selecionado.';
+  }
+}
+
 function shortName(name){
   return name.length>28 ? name.slice(0,26)+'…' : name;
 }
 
 function refresh(){
-  const {byMonth, byCompPie, total, nComp, fc} = aggregate();
+  const {byMonth, byMonthAll, byCompPie, total, nComp, fc} = aggregate();
 
   // cards
   el('cTot').textContent = nf.format(total);
@@ -214,29 +334,53 @@ function refresh(){
   if (fc!==-1) parts.push(D.comps[fc]);
   if (+el('fUf').value!==-1) parts.push('UF ' + D.ufs[+el('fUf').value]);
   if (+el('fMkt').value!==-1) parts.push(D.mkts[+el('fMkt').value]);
-  el('chartNote').textContent = parts.length ? 'Filtro: ' + parts.join(' · ') : 'Todas as companhias, estados e tipos de consumidor';
+  const [fa, fb] = faixa();
+  const mcSel = +el('fMes').value;
+  const inverteu = (+el('fIni').value) > (+el('fFim').value);
+  const ativos = mesesAtivos();
+  const nAtivos = ativos.reduce((x,y)=>x+y,0);
+  const rec = [`${D.months[fa]} a ${D.months[fb]}`];
+  if (mcSel !== -1) rec.push('somente ' + MESES_PT[mcSel-1]);
+  el('chartNote').textContent = 'Período: ' + rec.join(' · ') +
+    (parts.length ? ' · Filtro: ' + parts.join(' · ') : ' · todas as companhias, estados e tipos de consumidor');
+
+  let aviso = '';
+  if (nAtivos === 0) aviso = 'O recorte selecionado não contém nenhum mês.';
+  else if (total === 0) aviso = 'Nenhuma venda registrada no recorte selecionado.';
+  else if (inverteu) aviso = 'Período inicial posterior ao final — as duas pontas foram invertidas.';
+  el('faixaVazia').textContent = aviso;
+  el('faixaVazia').style.display = aviso ? 'block' : 'none';
   // sem filtros, todos os meses ficam acima de 7.000 mil m³: eixo parte de 7.000
   // para dar zoom na variação; com filtros, volta ao automático.
   monthChart.options.scales.y.min = parts.length ? undefined : 7000;
   monthChart.update();
 
-  // quadro: acumulado do ano atual x mesmo período do ano anterior
+  // quadro: janela selecionada x mesma janela 12 meses antes.
+  // Na visao padrao (intervalo cheio, sem mes escolhido) o quadro perderia a
+  // graca -- comparar a base inteira consigo mesma nao diz nada --, entao ali
+  // ele volta ao comportamento antigo: ano corrente contra o ano anterior.
   const anoAtual = +D.months[D.months.length-1].slice(0,4);
-  const mesFinal = +D.months[D.months.length-1].slice(5,7);
-  let acumAtual = 0, acumAnt = 0;
-  D.months.forEach((ym,i)=>{
-    const a = +ym.slice(0,4), m = +ym.slice(5,7);
-    if (m <= mesFinal){
-      if (a === anoAtual) acumAtual += byMonth[i];
-      else if (a === anoAtual-1) acumAnt += byMonth[i];
-    }
-  });
-  const varAc = acumAnt > 0 ? (acumAtual/acumAnt - 1) * 100 : null;
-  const mesNome = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][mesFinal-1];
+  const semRecorte = (fa === 0 && fb === D.months.length-1 && mcSel === -1);
+  const sel = [];
+  for (let i=0;i<D.months.length;i++){
+    if (semRecorte ? (+D.months[i].slice(0,4) === anoAtual) : ativos[i]) sel.push(i);
+  }
+  // A janela anterior le byMonthAll: por definicao ela cai fora do recorte.
+  // Se qualquer mes dela faltar na base, mostra N/D em vez de somar parcial.
+  let acumAtual = 0, acumAnt = 0, baseCompleta = sel.length > 0;
+  for (const i of sel){
+    acumAtual += byMonthAll[i];
+    const j = i - 12;
+    if (j < 0) { baseCompleta = false; continue; }
+    acumAnt += byMonthAll[j];
+  }
+  const varAc = (baseCompleta && acumAnt > 0) ? (acumAtual/acumAnt - 1) * 100 : null;
+  const rot = s => s.length ? `${D.months[s[0]]} a ${D.months[s[s.length-1]]}` : '—';
+  const rotAnt = baseCompleta && sel.length ? `${D.months[sel[0]-12]} a ${D.months[sel[sel.length-1]-12]}` : '—';
   el('ytdBox').innerHTML = `
-    <div class="box"><div class="label">Acumulado ${anoAtual} (jan–${mesNome})</div><div class="value">${nf.format(acumAtual)}</div><div class="sub">mil m³</div></div>
-    <div class="box"><div class="label">Acumulado ${anoAtual-1} (jan–${mesNome})</div><div class="value">${nf.format(acumAnt)}</div><div class="sub">mil m³</div></div>
-    <div class="box"><div class="label">Variação ${anoAtual} x ${anoAtual-1}</div><div class="value ${varAc===null?'':(varAc>=0?'up':'down')}">${varAc===null?'—':(varAc>=0?'+':'')+varAc.toFixed(1)+'%'}</div><div class="sub">mesmo período</div></div>`;
+    <div class="box"><div class="label">Janela selecionada (${rot(sel)})</div><div class="value">${nf.format(acumAtual)}</div><div class="sub">mil m³</div></div>
+    <div class="box"><div class="label">Mesma janela 12 meses antes (${rotAnt})</div><div class="value">${baseCompleta?nf.format(acumAnt):'N/D'}</div><div class="sub">${baseCompleta?'mil m³':'fora da base'}</div></div>
+    <div class="box"><div class="label">Variação</div><div class="value ${varAc===null?'':(varAc>=0?'up':'down')}">${varAc===null?'—':(varAc>=0?'+':'')+varAc.toFixed(1)+'%'}</div><div class="sub">mesma janela, 12 meses antes</div></div>`;
 
   // pizza (top 12 + outras) — 4 maiores em destaque
   const idx = Array.from(byCompPie).map((v,i)=>[v,i]).filter(x=>x[0]>0).sort((a,b)=>b[0]-a[0]);
@@ -249,11 +393,16 @@ function refresh(){
     i < TOP_DESTAQUE ? PIE_TOP[i] : (rest>0 && i===nFatias-1 ? PIE_OUTRAS : PIE_REST[(i-TOP_DESTAQUE)%PIE_REST.length]));
   pieChart.data.datasets[0].offset = Array.from({length:nFatias}, (_,i)=> i < TOP_DESTAQUE ? 22 : 0);
   pieChart.update();
+
+  refreshMix();
 }
 
 el('fComp').addEventListener('change', refresh);
 el('fUf').addEventListener('change', refresh);
 el('fMkt').addEventListener('change', refresh);
+el('fIni').addEventListener('change', refresh);
+el('fFim').addEventListener('change', refresh);
+el('fMes').addEventListener('change', refresh);
 refresh();
 </script>
 </body>
