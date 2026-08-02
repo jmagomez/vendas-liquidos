@@ -1,6 +1,6 @@
 """Atualiza data.js do dashboard: baixa o CSV de vendas de combustíveis
 líquidos da ANP (Liquidos_Vendas_Atual.csv), agrega por mês, companhia,
-UF de destino e mercado destinatário, e grava data.js compacto."""
+UF de destino, mercado destinatário e produto, e grava data.js compacto."""
 import csv
 import io
 import zipfile
@@ -64,12 +64,24 @@ def baixar():
     raise RuntimeError(f"ANP indisponível após {TENTATIVAS} tentativas ({ultima_falha})")
 
 
-# Posições das colunas usadas no CSV da ANP. O arquivo não tem cabeçalho
-# estável documentado, então lemos por índice — mas cada linha é validada
-# (ver `agregar`). Se a ANP inserir ou reordenar uma coluna, a validação
-# derruba a rotina em vez de gravar um data.js silenciosamente errado.
-COL_ANO, COL_MES, COL_COMP, COL_UF, COL_MKT, COL_QTD = 0, 1, 2, 9, 10, 11
+# Posicoes das colunas no CSV da ANP. A ANP nao documenta um layout estavel,
+# entao lemos por indice e validamos cada linha (ver `agregar`): se uma coluna
+# for inserida ou reordenada, a rotina cai em vez de gravar numeros errados em
+# silencio. Cabecalho lido do proprio arquivo em 2026-08:
+# "Ano";"Mes";"Agente Regulado";"Codigo do Produto";"Nome do Produto";
+# "Descricao do Produto";"Regiao Origem";"UF Origem";"Regiao Destinatario";
+# "UF Destino";"Mercado Destinatario";"Quantidade de Produto (mil m3)"
+#
+# Usamos a coluna 4 ("Nome do Produto": Diesel B, Gasolina C, Etanol Hidratado,
+# Oleo Comb.) e nao a 5 ("Descricao do Produto"), que separa comum/aditivada e
+# multiplicaria as combinacoes sem responder nenhuma pergunta que o dashboard faca.
+COL_ANO, COL_MES, COL_COMP, COL_PROD, COL_UF, COL_MKT, COL_QTD = 0, 1, 2, 4, 9, 10, 11
 N_COLUNAS_MIN = 12
+
+# Numero de campos por linha em data.js["rows"]. Fica gravado no arquivo para
+# que quem le (dashboard, workflow) nao precise assumir o passo: assumir errado
+# nao quebra nada visivelmente, so produz numeros errados.
+CAMPOS = ["mes", "comp", "uf", "mkt", "prod", "qtd"]
 
 ANO_MIN, ANO_MAX = 2000, 2100
 # Fração máxima de linhas descartadas antes de considerar que o layout mudou.
@@ -77,7 +89,7 @@ TOLERANCIA_DESCARTE = 0.01
 
 
 def agregar(conteudo: bytes):
-    """Agrega por (ano-mês, companhia, UF de destino, mercado destinatário).
+    """Agrega por (ano-mês, companhia, UF de destino, mercado destinatário, produto).
 
     Cada linha é validada antes de entrar na soma. Sem isso, uma mudança de
     layout da ANP (coluna nova, reordenação) produziria um data.js com números
@@ -121,7 +133,8 @@ def agregar(conteudo: bytes):
             descartadas += 1
             motivos["mês fora de 1-12"] += 1
             continue
-        agg[(f"{ano}-{mes:02d}", row[COL_COMP], row[COL_UF], row[COL_MKT])] += qtd
+        agg[(f"{ano}-{mes:02d}", row[COL_COMP], row[COL_UF],
+             row[COL_MKT], row[COL_PROD])] += qtd
 
     if not total:
         raise RuntimeError("CSV da ANP não tem linhas de dados")
@@ -163,7 +176,18 @@ def conferir_contra_anterior(novo, anterior):
             f"(ultimo antes: {anterior['months'][-1]}, agora: {novo['months'][-1]}). "
             "Arquivo da ANP provavelmente veio truncado; data.js NAO foi alterado."
         )
-    linhas_antes, linhas_agora = len(anterior["rows"]) // 5, len(novo["rows"]) // 5
+    # O arquivo anterior pode ter sido gerado antes de o produto entrar na chave.
+    # Comparar 5 campos com 6 daria uma "queda" inventada, entao o passo vem do
+    # proprio arquivo lido; sem a marca, assume o formato antigo.
+    passo_antes = len(anterior.get("campos") or []) or 5
+    passo_agora = len(novo.get("campos") or CAMPOS)
+    linhas_antes = len(anterior["rows"]) // passo_antes
+    linhas_agora = len(novo["rows"]) // passo_agora
+    if passo_antes != passo_agora:
+        print(f"[update] esquema mudou ({passo_antes} -> {passo_agora} campos por linha); "
+              f"comparacao de combinacoes fica so informativa "
+              f"({linhas_antes} -> {linhas_agora})")
+        return
     if linhas_agora < linhas_antes * 0.95:
         raise RuntimeError(
             f"regressao: {linhas_agora} combinacoes contra {linhas_antes} no atual "
@@ -176,17 +200,19 @@ def gerar_data_js(agg):
     comps = sorted({k[1] for k in agg})
     ufs = sorted({k[2] for k in agg})
     mkts = sorted({k[3] for k in agg})
+    prods = sorted({k[4] for k in agg})
     mi = {v: i for i, v in enumerate(months)}
     ci = {v: i for i, v in enumerate(comps)}
     ui = {v: i for i, v in enumerate(ufs)}
     ki = {v: i for i, v in enumerate(mkts)}
+    pi = {v: i for i, v in enumerate(prods)}
     rows = []
-    for (ym, c, u, k), q in agg.items():
+    for (ym, c, u, k, p), q in agg.items():
         qi = round(q * 10000)  # mil m³ com 4 casas, como inteiro
         if qi:
-            rows.extend([mi[ym], ci[c], ui[u], ki[k], qi])
+            rows.extend([mi[ym], ci[c], ui[u], ki[k], pi[p], qi])
     return {"months": months, "comps": comps, "ufs": ufs, "mkts": mkts,
-            "rows": rows,
+            "prods": prods, "campos": CAMPOS, "rows": rows,
             "updated": datetime.now(timezone.utc).strftime("%Y-%m-%d")}
 
 
@@ -204,8 +230,13 @@ def main():
     conferir_contra_anterior(data, anterior)   # levanta antes de escrever
     escrever_data_js(data)
     total = sum(agg.values())
-    print(f"[update] {len(data['rows']) // 5} combinações | {data['months'][0]} a {data['months'][-1]} | "
-          f"total {total:,.0f} mil m³ | data.js atualizado")
+    por_produto = defaultdict(float)
+    for (_, _, _, _, p), q in agg.items():
+        por_produto[p] += q
+    print(f"[update] {len(data['rows']) // len(CAMPOS)} combinações | "
+          f"{data['months'][0]} a {data['months'][-1]} | total {total:,.0f} mil m³")
+    for p, q in sorted(por_produto.items(), key=lambda x: -x[1]):
+        print(f"[update]   {p}: {q:,.0f} mil m³ ({q / total:.1%})")
 
 
 if __name__ == "__main__":
