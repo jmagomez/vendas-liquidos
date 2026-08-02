@@ -52,25 +52,39 @@ jobs:
           import json
           raw = open('data.js', encoding='utf-8').read().strip()
           d = json.loads(raw.removeprefix('window.VENDAS = ').rstrip(';\n'))
+          # O passo das linhas vem do proprio arquivo. Depois que o produto
+          # entrou na chave, assumir 5 nao daria erro nenhum -- so somaria os
+          # campos errados e mandaria um e-mail com numeros inventados.
+          campos = d.get('campos') or ['mes', 'comp', 'uf', 'mkt', 'qtd']
+          passo = len(campos)
+          i_mes, i_comp, i_qtd = campos.index('mes'), campos.index('comp'), campos.index('qtd')
+          i_prod = campos.index('prod') if 'prod' in campos else None
           nm = len(d['months'])
           by_month = [0.0] * nm
           by_comp_last = {}
+          by_prod_last = {}
           rows = d['rows']
-          for i in range(0, len(rows), 5):
-              m, c, q = rows[i], rows[i+1], rows[i+4] / 10000
+          for i in range(0, len(rows), passo):
+              m, c, q = rows[i + i_mes], rows[i + i_comp], rows[i + i_qtd] / 10000
               by_month[m] += q
               if m == nm - 1:
                   by_comp_last[c] = by_comp_last.get(c, 0.0) + q
+                  if i_prod is not None:
+                      p = rows[i + i_prod]
+                      by_prod_last[p] = by_prod_last.get(p, 0.0) + q
           ult, ant = by_month[-1], by_month[-2] if nm > 1 else 0.0
           var = (ult / ant - 1) * 100 if ant else 0.0
           top = max(by_comp_last, key=by_comp_last.get)
           share = by_comp_last[top] / ult * 100 if ult else 0.0
+          mix = ' · '.join(f"{d['prods'][p]} {v / ult * 100:.1f}%"
+                           for p, v in sorted(by_prod_last.items(), key=lambda x: -x[1]))
           print(f"mes={d['months'][-1]}")
           print(f"vol={ult:,.0f}".replace(',', '.'))
           print(f"var={var:+.1f}")
           print(f"top_comp={d['comps'][top]}")
           print(f"top_share={share:.1f}")
           print(f"periodo={d['months'][0]} a {d['months'][-1]}")
+          print(f"mix_li={'<li>Mix do mes: <b>' + mix + '</b></li>' if mix else ''}")
           PY
 
       - name: Envia e-mail com o dashboard
@@ -91,8 +105,9 @@ jobs:
             <ul>
               <li>Volume no último mês: <b>${{ steps.resumo.outputs.vol }} mil m³</b> (${{ steps.resumo.outputs.var }}% vs mês anterior)</li>
               <li>Líder no mês: <b>${{ steps.resumo.outputs.top_comp }}</b> (${{ steps.resumo.outputs.top_share }}% de participação)</li>
+              ${{ steps.resumo.outputs.mix_li }}
             </ul>
-            <p><a href="https://jmagomez.github.io/vendas-liquidos/">Abrir o dashboard completo</a> (vendas mensais com filtros por companhia, estado e tipo de consumidor + participação por companhia)</p>
+            <p><a href="https://jmagomez.github.io/vendas-liquidos/">Abrir o dashboard completo</a> (vendas mensais com filtros por companhia, estado, tipo de consumidor, combustível e período + evolução do mix e participação por companhia)</p>
             <p style="color:#888;font-size:12px">Rotina mensal automática (dia 5) via GitHub Actions · dados abertos da ANP</p>
 
       - name: Notifica falha por e-mail
