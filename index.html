@@ -25,6 +25,10 @@
   .panel { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:18px; margin-bottom:16px; }
   .panel h2 { font-size:1rem; color:var(--muted); font-weight:500; margin-bottom:4px; }
   .panel .note { color:var(--muted); font-size:.73rem; margin-bottom:10px; }
+  .mix-tabs { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
+  .mix-tabs button { background:transparent; color:var(--muted); border:1px solid rgba(139,148,158,.3);
+    border-radius:999px; padding:4px 12px; font-size:.73rem; cursor:pointer; font-family:inherit; }
+  .mix-tabs button.on { background:rgba(88,166,255,.15); color:#58a6ff; border-color:rgba(88,166,255,.5); }
   .ytd { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
   .ytd .box { background:rgba(88,166,255,.06); border:1px solid var(--border); border-radius:8px; padding:8px 14px; min-width:140px; }
   .ytd .box .label { color:var(--muted); font-size:.68rem; text-transform:uppercase; letter-spacing:.05em; }
@@ -57,6 +61,7 @@
     <div class="filter"><label for="fComp">Companhia</label><select id="fComp"></select></div>
     <div class="filter"><label for="fUf">Estado (UF destino)</label><select id="fUf"></select></div>
     <div class="filter"><label for="fMkt">Tipo de consumidor</label><select id="fMkt"></select></div>
+    <div class="filter" id="boxProd"><label for="fProd">Combustível</label><select id="fProd"></select></div>
     <div class="filter"><label for="fIni">Período inicial</label><select id="fIni"></select></div>
     <div class="filter"><label for="fFim">Período final</label><select id="fFim"></select></div>
     <div class="filter"><label for="fMes">Mês (sazonalidade)</label><select id="fMes"></select></div>
@@ -78,14 +83,18 @@
   </div>
 
   <div class="panel">
-    <h2>Evolução do mix por tipo de consumidor</h2>
+    <h2 id="mixTitulo">Evolução do mix por tipo de consumidor</h2>
+    <div class="mix-tabs" id="mixTabs">
+      <button type="button" data-mix="mkt" class="on">Por tipo de consumidor</button>
+      <button type="button" data-mix="prod">Por combustível</button>
+    </div>
     <div class="note" id="mixNote"></div>
     <div class="chart-box h-md"><canvas id="mixChart"></canvas></div>
   </div>
 
   <div class="panel">
     <h2>Participação por companhia</h2>
-    <div class="note">4 maiores em destaque · top 12 companhias + demais agregadas · respeita filtros de estado e tipo de consumidor (não o de companhia)</div>
+    <div class="note">4 maiores em destaque · top 12 companhias + demais agregadas · respeita filtros de estado, tipo de consumidor, combustível e período (não o de companhia)</div>
     <div class="chart-box h-pie"><canvas id="pieChart"></canvas></div>
   </div>
 
@@ -94,6 +103,17 @@
 <script>
 const D = window.VENDAS;
 const R = D.rows, NR = R.length;
+
+// O passo e a ordem dos campos vem do proprio data.js. Quando o produto entrou
+// na chave as linhas passaram de 5 para 6 campos: com o passo fixo no codigo,
+// um arquivo do formato antigo nao daria erro nenhum -- so desenharia numeros
+// errados. Aqui, na falta da marca, assumimos explicitamente o formato antigo.
+const CAMPOS = D.campos || ['mes','comp','uf','mkt','qtd'];
+const P = CAMPOS.length;
+const I_MES = CAMPOS.indexOf('mes'), I_COMP = CAMPOS.indexOf('comp'),
+      I_UF = CAMPOS.indexOf('uf'), I_MKT = CAMPOS.indexOf('mkt'),
+      I_QTD = CAMPOS.indexOf('qtd'), I_PROD = CAMPOS.indexOf('prod');
+const TEM_PROD = I_PROD !== -1 && Array.isArray(D.prods) && D.prods.length > 0;
 const el = id => document.getElementById(id);
 const nf = new Intl.NumberFormat('pt-BR', {maximumFractionDigits:0});
 const nf1 = new Intl.NumberFormat('pt-BR', {maximumFractionDigits:1});
@@ -112,6 +132,9 @@ function fillSelect(id, items, allLabel){
 fillSelect('fComp', D.comps, 'Todas as companhias');
 fillSelect('fUf', D.ufs, 'Todos os estados');
 fillSelect('fMkt', D.mkts, 'Todos os tipos');
+if (TEM_PROD) fillSelect('fProd', D.prods, 'Todos os combustíveis');
+else { el('boxProd').style.display = 'none'; el('mixTabs').style.display = 'none'; }
+const fProd = () => TEM_PROD ? +el('fProd').value : -1;
 
 // Periodo: dois seletores com os proprios meses da base. Nao ha opcao "todos"
 // porque o intervalo cheio (primeiro ao ultimo) ja e o padrao.
@@ -159,8 +182,10 @@ function aggregate(){
   const byCompPie = new Float64Array(D.comps.length); // ignora filtro de companhia
   const compSet = new Set();
   let total = 0;
-  for (let i=0;i<NR;i+=5){
-    const m=R[i], c=R[i+1], u=R[i+2], k=R[i+3], q=R[i+4]/10000;
+  const fp = fProd();
+  for (let i=0;i<NR;i+=P){
+    const m=R[i+I_MES], c=R[i+I_COMP], u=R[i+I_UF], k=R[i+I_MKT], q=R[i+I_QTD]/10000;
+    if (fp!==-1 && R[i+I_PROD]!==fp) continue;
     if (fu!==-1 && u!==fu) continue;
     if (fk!==-1 && k!==fk) continue;
     if (fc===-1 || c===fc) byMonthAll[m] += q;
@@ -174,22 +199,32 @@ function aggregate(){
   return {byMonth, byMonthAll, byCompPie, total, nComp: compSet.size, fc};
 }
 
-// Mix por tipo de consumidor ao longo do tempo. Respeita os filtros de companhia
-// e de UF, mas IGNORA o de tipo -- senao o grafico de composicao mostraria uma
-// unica faixa de 100%, que nao diz nada.
+// Mix ao longo do tempo, por tipo de consumidor ou por combustivel.
+// Em cada modo o grafico IGNORA o filtro da propria dimensao: com ele aplicado
+// a composicao viraria uma faixa unica de 100%, tecnicamente correta e inutil.
+// Os demais filtros continuam valendo.
+let mixModo = 'mkt';
+
 function aggregateMix(){
   const fc = +el('fComp').value, fu = +el('fUf').value;
-  const nm = D.months.length, nk = D.mkts.length;
+  const porProd = mixModo === 'prod';
+  const fk = porProd ? +el('fMkt').value : -1;   // no modo produto, o tipo filtra
+  const fp = porProd ? -1 : fProd();             // no modo tipo, o combustivel filtra
+  const cats = porProd ? D.prods : D.mkts;
+  const iCat = porProd ? I_PROD : I_MKT;
+  const nm = D.months.length;
   const ativos = mesesAtivos();
-  const m = Array.from({length:nk}, () => new Float64Array(nm));
-  for (let i=0;i<NR;i+=5){
-    const mo=R[i], c=R[i+1], u=R[i+2], k=R[i+3], q=R[i+4]/10000;
+  const m = Array.from({length:cats.length}, () => new Float64Array(nm));
+  for (let i=0;i<NR;i+=P){
+    const mo=R[i+I_MES], q=R[i+I_QTD]/10000;
     if (!ativos[mo]) continue;
-    if (fc!==-1 && c!==fc) continue;
-    if (fu!==-1 && u!==fu) continue;
-    m[k][mo] += q;
+    if (fc!==-1 && R[i+I_COMP]!==fc) continue;
+    if (fu!==-1 && R[i+I_UF]!==fu) continue;
+    if (fk!==-1 && R[i+I_MKT]!==fk) continue;
+    if (fp!==-1 && R[i+I_PROD]!==fp) continue;
+    m[R[i+iCat]][mo] += q;
   }
-  return m;
+  return {m, cats};
 }
 
 // ===== charts =====
@@ -272,16 +307,16 @@ const mixChart = new Chart(el('mixChart'), {
 });
 
 function refreshMix(){
-  const m = aggregateMix();
+  const {m, cats} = aggregateMix();
   const nm = D.months.length;
   // converte para participacao; mes sem venda no recorte fica nulo em vez de 0,
   // senao o grafico desenha uma queda para zero que nao existe.
   const tot = new Float64Array(nm);
-  for (let k=0;k<D.mkts.length;k++) for (let i=0;i<nm;i++) tot[i]+=m[k][i];
+  for (let k=0;k<cats.length;k++) for (let i=0;i<nm;i++) tot[i]+=m[k][i];
   const ativos = [];
-  for (let k=0;k<D.mkts.length;k++) if (m[k].reduce((a,b)=>a+b,0) > 0) ativos.push(k);
+  for (let k=0;k<cats.length;k++) if (m[k].reduce((a,b)=>a+b,0) > 0) ativos.push(k);
   mixChart.data.datasets = ativos.map((k,idx)=>({
-    label: D.mkts[k],
+    label: cats[k],
     data: Array.from({length:nm}, (_,i)=> tot[i]>0 ? m[k][i]/tot[i]*100 : null),
     backgroundColor: MIX_CORES[idx % MIX_CORES.length],
     borderColor: MIX_CORES[idx % MIX_CORES.length],
@@ -295,12 +330,18 @@ function refreshMix(){
   const fim = nm-1-[...tot].reverse().findIndex(v=>v>0);
   if (ini>=0 && fim>ini){
     for (const k of ativos){
-      nota.push(`${D.mkts[k]}: ${nf1.format(m[k][ini]/tot[ini]*100)}% → ${nf1.format(m[k][fim]/tot[fim]*100)}%`);
+      nota.push(`${cats[k]}: ${nf1.format(m[k][ini]/tot[ini]*100)}% → ${nf1.format(m[k][fim]/tot[fim]*100)}%`);
     }
-    el('mixNote').textContent = `Participação de cada tipo no volume do recorte · ${D.months[ini]} → ${D.months[fim]} · ` + nota.join(' · ');
+    const dim = mixModo === 'prod' ? 'combustível' : 'tipo';
+    const ignora = mixModo === 'prod' ? 'não respeita o filtro de combustível'
+                                      : 'não respeita o filtro de tipo de consumidor';
+    el('mixNote').textContent = `Participação de cada ${dim} no volume do recorte (${ignora}) · `
+      + `${D.months[ini]} → ${D.months[fim]} · ` + nota.join(' · ');
   } else {
     el('mixNote').textContent = 'Sem dados no recorte selecionado.';
   }
+  el('mixTitulo').textContent = mixModo === 'prod'
+    ? 'Evolução do mix por combustível' : 'Evolução do mix por tipo de consumidor';
 }
 
 function shortName(name){
@@ -334,6 +375,7 @@ function refresh(){
   if (fc!==-1) parts.push(D.comps[fc]);
   if (+el('fUf').value!==-1) parts.push('UF ' + D.ufs[+el('fUf').value]);
   if (+el('fMkt').value!==-1) parts.push(D.mkts[+el('fMkt').value]);
+  if (fProd()!==-1) parts.push(D.prods[fProd()]);
   const [fa, fb] = faixa();
   const mcSel = +el('fMes').value;
   const inverteu = (+el('fIni').value) > (+el('fFim').value);
@@ -400,9 +442,17 @@ function refresh(){
 el('fComp').addEventListener('change', refresh);
 el('fUf').addEventListener('change', refresh);
 el('fMkt').addEventListener('change', refresh);
+if (TEM_PROD) el('fProd').addEventListener('change', refresh);
 el('fIni').addEventListener('change', refresh);
 el('fFim').addEventListener('change', refresh);
 el('fMes').addEventListener('change', refresh);
+el('mixTabs').addEventListener('click', ev => {
+  const b = ev.target.closest('button[data-mix]');
+  if (!b || b.dataset.mix === mixModo) return;
+  mixModo = b.dataset.mix;
+  [...el('mixTabs').children].forEach(x => x.classList.toggle('on', x === b));
+  refreshMix();
+});
 refresh();
 </script>
 </body>

@@ -20,22 +20,27 @@ def csv_bytes(*linhas):
     return ("\n".join([CAB, *linhas]) + "\n").encode("latin-1")
 
 
-def linha(ano=2026, mes=5, comp="DISTRIB A", uf="SP", mkt="TRR", qtd="1.234,50"):
+def linha(ano=2026, mes=5, comp="DISTRIB A", uf="SP", mkt="TRR",
+          prod="Diesel B", qtd="1.234,50"):
     campos = [""] * 15
     campos[ud.COL_ANO], campos[ud.COL_MES] = str(ano), str(mes)
     campos[ud.COL_COMP], campos[ud.COL_UF] = comp, uf
     campos[ud.COL_MKT], campos[ud.COL_QTD] = mkt, qtd
+    campos[ud.COL_PROD] = prod
     return ";".join(campos)
+
+
+CHAVE = ("2026-05", "DISTRIB A", "SP", "TRR", "Diesel B")
 
 
 def test_soma_por_chave():
     agg = ud.agregar(csv_bytes(linha(qtd="10,5"), linha(qtd="4,5")))
-    assert agg[("2026-05", "DISTRIB A", "SP", "TRR")] == pytest.approx(15.0)
+    assert agg[CHAVE] == pytest.approx(15.0)
 
 
 def test_mes_recebe_zero_a_esquerda():
     agg = ud.agregar(csv_bytes(linha(mes=3, qtd="1,0")))
-    assert ("2026-03", "DISTRIB A", "SP", "TRR") in agg
+    assert ("2026-03", "DISTRIB A", "SP", "TRR", "Diesel B") in agg
 
 
 def test_cabecalho_curto_derruba():
@@ -65,7 +70,7 @@ def test_muitas_linhas_invalidas_derrubam():
 def test_poucas_linhas_invalidas_sao_toleradas():
     boas = [linha(qtd="1,0") for _ in range(300)]
     agg = ud.agregar(csv_bytes(*boas, linha(mes=13)))
-    assert agg[("2026-05", "DISTRIB A", "SP", "TRR")] == pytest.approx(300.0)
+    assert agg[CHAVE] == pytest.approx(300.0)
 
 
 def test_regressao_de_meses_derruba():
@@ -76,16 +81,45 @@ def test_regressao_de_meses_derruba():
 
 
 def test_regressao_de_combinacoes_derruba():
-    anterior = {"months": ["2026-05"], "rows": [0] * (5 * 1000)}
-    novo = {"months": ["2026-05"], "rows": [0] * (5 * 800)}
+    anterior = {"months": ["2026-05"], "campos": ud.CAMPOS, "rows": [0] * (6 * 1000)}
+    novo = {"months": ["2026-05"], "campos": ud.CAMPOS, "rows": [0] * (6 * 800)}
     with pytest.raises(RuntimeError, match="regressao"):
         ud.conferir_contra_anterior(novo, anterior)
 
 
 def test_crescimento_normal_passa():
-    anterior = {"months": ["2026-04"], "rows": [0] * (5 * 1000)}
-    novo = {"months": ["2026-04", "2026-05"], "rows": [0] * (5 * 1100)}
+    anterior = {"months": ["2026-04"], "campos": ud.CAMPOS, "rows": [0] * (6 * 1000)}
+    novo = {"months": ["2026-04", "2026-05"], "campos": ud.CAMPOS, "rows": [0] * (6 * 1100)}
     ud.conferir_contra_anterior(novo, anterior)  # nao levanta
+
+
+def test_mudanca_de_esquema_nao_derruba():
+    """O data.js antigo tem 5 campos por linha; o novo tem 6. Comparar os dois
+    como se fossem o mesmo formato inventaria uma queda de combinacoes."""
+    anterior = {"months": ["2026-04"], "rows": [0] * (5 * 1000)}   # sem "campos"
+    novo = {"months": ["2026-04"], "campos": ud.CAMPOS, "rows": [0] * (6 * 1100)}
+    ud.conferir_contra_anterior(novo, anterior)  # nao levanta
+
+
+def test_produto_entra_na_chave():
+    """Dois produtos na mesma companhia/UF/mercado nao podem virar uma linha so."""
+    agg = ud.agregar(csv_bytes(linha(prod="Diesel B", qtd="10,0"),
+                               linha(prod="Gasolina C", qtd="4,0")))
+    assert agg[("2026-05", "DISTRIB A", "SP", "TRR", "Diesel B")] == pytest.approx(10.0)
+    assert agg[("2026-05", "DISTRIB A", "SP", "TRR", "Gasolina C")] == pytest.approx(4.0)
+
+
+def test_data_js_expoe_produtos_e_esquema():
+    agg = ud.agregar(csv_bytes(linha(prod="Diesel B", qtd="10,0"),
+                               linha(prod="Gasolina C", qtd="4,0")))
+    d = ud.gerar_data_js(agg)
+    assert d["prods"] == ["Diesel B", "Gasolina C"]
+    assert d["campos"] == ud.CAMPOS
+    assert len(d["rows"]) == 2 * len(ud.CAMPOS)
+    # o indice de produto tem de apontar para o nome certo
+    passo = len(ud.CAMPOS)
+    achou = {d["prods"][d["rows"][i + 4]]: d["rows"][i + 5] for i in range(0, len(d["rows"]), passo)}
+    assert achou == {"Diesel B": 100000, "Gasolina C": 40000}
 
 
 def test_sem_anterior_nao_bloqueia():
