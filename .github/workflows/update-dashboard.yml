@@ -2,15 +2,28 @@ name: Atualiza dashboard de vendas ANP
 
 on:
   schedule:
-    - cron: "0 12 5 * *"   # dia 5 de cada mês, 12:00 UTC (9h em Brasília)
+    # Duas passadas por mês. A ANP não fecha o mês anterior no dia 5: os agentes
+    # ainda estão dentro do prazo de declaração, e o Liquidos_Vendas_Atual.csv
+    # já lista o mês corrente com as poucas entregas antecipadas. A rodada do
+    # dia 20 é a que costuma pegar o mês anterior consolidado; a do dia 5 pega
+    # revisões e serve de rede se a do dia 20 falhar.
+    - cron: "0 12 5 * *"    # dia 5, 12:00 UTC (9h em Brasília)
+    - cron: "0 12 20 * *"   # dia 20, 12:00 UTC
   workflow_dispatch: {}     # permite rodar manualmente na aba Actions
 
 permissions:
   contents: write
 
+# Duas execuções simultâneas (ex.: cron + dispatch manual) commitariam por cima
+# uma da outra. Fila em vez de corrida.
+concurrency:
+  group: update-dashboard
+  cancel-in-progress: false
+
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -24,17 +37,18 @@ jobs:
             echo "ok=true" >> "$GITHUB_OUTPUT"
           else
             echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Secrets MAIL_USERNAME/MAIL_PASSWORD ausentes — e-mails não serão enviados."
+            echo "::warning::Secrets MAIL_USERNAME/MAIL_PASSWORD_ANP ausentes — e-mails não serão enviados."
           fi
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: requirements.txt
 
       - name: Atualiza dados
         run: |
-          pip install requests
+          pip install -r requirements.txt
           python scripts/update_dashboard.py
 
       - name: Commita se houver mudança
@@ -42,50 +56,24 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data.js
-          git diff --cached --quiet || git commit -m "Atualiza dados de vendas (rotina mensal)"
-          git push
+          if git diff --cached --quiet; then
+            echo "::notice::data.js sem alteração — nada a commitar."
+            exit 0
+          fi
+          git commit -m "Atualiza dados de vendas (rotina mensal)"
+          # Um commit manual entre o checkout e o push derruba o push. Rebase e
+          # tenta de novo antes de falhar a rotina inteira por uma corrida.
+          for tentativa in 1 2 3; do
+            git push && exit 0
+            echo "push falhou (tentativa $tentativa); rebase e nova tentativa"
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+            sleep 5
+          done
+          echo "::error::não consegui dar push após 3 tentativas"; exit 1
 
       - name: Extrai resumo para o e-mail
         id: resumo
-        run: |
-          python - << 'PY' >> "$GITHUB_OUTPUT"
-          import json
-          raw = open('data.js', encoding='utf-8').read().strip()
-          d = json.loads(raw.removeprefix('window.VENDAS = ').rstrip(';\n'))
-          # O passo das linhas vem do proprio arquivo. Depois que o produto
-          # entrou na chave, assumir 5 nao daria erro nenhum -- so somaria os
-          # campos errados e mandaria um e-mail com numeros inventados.
-          campos = d.get('campos') or ['mes', 'comp', 'uf', 'mkt', 'qtd']
-          passo = len(campos)
-          i_mes, i_comp, i_qtd = campos.index('mes'), campos.index('comp'), campos.index('qtd')
-          i_prod = campos.index('prod') if 'prod' in campos else None
-          nm = len(d['months'])
-          by_month = [0.0] * nm
-          by_comp_last = {}
-          by_prod_last = {}
-          rows = d['rows']
-          for i in range(0, len(rows), passo):
-              m, c, q = rows[i + i_mes], rows[i + i_comp], rows[i + i_qtd] / 10000
-              by_month[m] += q
-              if m == nm - 1:
-                  by_comp_last[c] = by_comp_last.get(c, 0.0) + q
-                  if i_prod is not None:
-                      p = rows[i + i_prod]
-                      by_prod_last[p] = by_prod_last.get(p, 0.0) + q
-          ult, ant = by_month[-1], by_month[-2] if nm > 1 else 0.0
-          var = (ult / ant - 1) * 100 if ant else 0.0
-          top = max(by_comp_last, key=by_comp_last.get)
-          share = by_comp_last[top] / ult * 100 if ult else 0.0
-          mix = ' · '.join(f"{d['prods'][p]} {v / ult * 100:.1f}%"
-                           for p, v in sorted(by_prod_last.items(), key=lambda x: -x[1]))
-          print(f"mes={d['months'][-1]}")
-          print(f"vol={ult:,.0f}".replace(',', '.'))
-          print(f"var={var:+.1f}")
-          print(f"top_comp={d['comps'][top]}")
-          print(f"top_share={share:.1f}")
-          print(f"periodo={d['months'][0]} a {d['months'][-1]}")
-          print(f"mix_li={'<li>Mix do mes: <b>' + mix + '</b></li>' if mix else ''}")
-          PY
+        run: python scripts/resumo_email.py >> "$GITHUB_OUTPUT"
 
       - name: Envia e-mail com o dashboard
         if: success() && steps.mail.outputs.ok == 'true'
@@ -96,19 +84,26 @@ jobs:
           secure: true
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD_ANP }}
-          subject: "Vendas ANP ${{ steps.resumo.outputs.mes }}: ${{ steps.resumo.outputs.vol }} mil m³ (${{ steps.resumo.outputs.var }}% no mês) — dashboard atualizado"
+          subject: "Vendas ANP ${{ steps.resumo.outputs.mes }}: ${{ steps.resumo.outputs.vol }} mil m³ (${{ steps.resumo.outputs.var_yoy }}% a/a) — dashboard atualizado"
           to: jmagomez@gmail.com
           from: "Vendas Líquidos ANP <${{ secrets.MAIL_USERNAME }}>"
           html_body: |
             <h2>Dashboard de vendas de combustíveis líquidos atualizado</h2>
-            <p>Dados da ANP até <b>${{ steps.resumo.outputs.mes }}</b> (período ${{ steps.resumo.outputs.periodo }}):</p>
+            <p>Último mês <b>consolidado</b> pela ANP: <b>${{ steps.resumo.outputs.mes }}</b>
+            (série ${{ steps.resumo.outputs.periodo }}):</p>
             <ul>
-              <li>Volume no último mês: <b>${{ steps.resumo.outputs.vol }} mil m³</b> (${{ steps.resumo.outputs.var }}% vs mês anterior)</li>
+              <li>Volume no mês: <b>${{ steps.resumo.outputs.vol }} mil m³</b></li>
+              <li>Variação a/a (vs ${{ steps.resumo.outputs.mes_yoy }}): <b>${{ steps.resumo.outputs.var_yoy }}%</b> · vs mês anterior: ${{ steps.resumo.outputs.var }}%</li>
               <li>Líder no mês: <b>${{ steps.resumo.outputs.top_comp }}</b> (${{ steps.resumo.outputs.top_share }}% de participação)</li>
+              <li>HHI do mês (por agente regulado): <b>${{ steps.resumo.outputs.hhi }}</b></li>
               ${{ steps.resumo.outputs.mix_li }}
+              ${{ steps.resumo.outputs.otto_li }}
             </ul>
-            <p><a href="https://jmagomez.github.io/vendas-liquidos/">Abrir o dashboard completo</a> (vendas mensais com filtros por companhia, estado, tipo de consumidor, combustível e período + evolução do mix e participação por companhia)</p>
-            <p style="color:#888;font-size:12px">Rotina mensal automática (dia 5) via GitHub Actions · dados abertos da ANP</p>
+            ${{ steps.resumo.outputs.aviso_parcial }}
+            <p><a href="https://jmagomez.github.io/vendas-liquidos/">Abrir o dashboard completo</a>
+            (vendas mensais com média móvel 12m, variação a/a, mix por combustível e por tipo de
+            consumidor, ranking de companhias, concentração e exportação em CSV)</p>
+            <p style="color:#888;font-size:12px">Rotina automática (dias 5 e 20) via GitHub Actions · dados abertos da ANP</p>
 
       - name: Notifica falha por e-mail
         if: failure() && steps.mail.outputs.ok == 'true'
@@ -123,6 +118,8 @@ jobs:
           to: jmagomez@gmail.com
           from: "Vendas Líquidos ANP <${{ secrets.MAIL_USERNAME }}>"
           body: |
-            A rotina mensal do dashboard de vendas ANP falhou.
+            A rotina do dashboard de vendas ANP falhou. O data.js NÃO foi alterado
+            se a falha veio de uma das travas de integridade (layout do CSV,
+            regressão de meses, mês fechado encolhendo).
 
             Log completo: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
