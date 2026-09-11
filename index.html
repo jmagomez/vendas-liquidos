@@ -924,10 +924,12 @@ function exportarCsv(){
     const [m,c] = chave.split('|').map(Number);
     linhas.push(`${D.months[m]};"${nomes[c].replace(/"/g,'""')}";${v.toFixed(4).replace('.', ',')}`);
   }
-  // BOM para o Excel reconhecer UTF-8 e nao comer os acentos. Escrito como
-  // escape: um BOM literal no fonte e um caractere invisivel que qualquer
-  // reformatacao ou copia-e-cola come sem deixar rastro.
-  const blob = new Blob(['﻿' + linhas.join('\n')], {type:'text/csv;charset=utf-8'});
+  // BOM, para o Excel reconhecer UTF-8 e nao comer os acentos. Escrito como
+  // codigo do caractere e nao como literal: um BOM literal no fonte e um
+  // caractere invisivel de 3 bytes que qualquer copia, reformatacao ou editor
+  // distraido come -- ou duplica -- sem deixar rastro no diff.
+  const BOM = String.fromCharCode(0xFEFF);
+  const blob = new Blob([BOM + linhas.join('\n')], {type:'text/csv;charset=utf-8'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   const primeiro = ativos.findIndex(v => v === 1), ultimo = ativos.lastIndexOf(1);
