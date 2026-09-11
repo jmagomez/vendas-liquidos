@@ -1,5 +1,5 @@
-# Adicionar como .github/workflows/ci.yml
-# Serve para: oil-gas-financial-dashboard, vendas-liquidos, projeto_bloomberg, resumo-focus-public
+# Template compartilhado com oil-gas-financial-dashboard, projeto_bloomberg e
+# resumo-focus-public. Mantenha as mudanças genéricas.
 name: CI
 
 on:

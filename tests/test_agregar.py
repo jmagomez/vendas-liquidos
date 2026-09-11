@@ -13,11 +13,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 import update_dashboard as ud  # noqa: E402
 
-CAB = ";".join(f"c{i}" for i in range(15))
+# Cabecalho real da ANP (lido do arquivo em 2026-08). Os testes usam o cabecalho
+# de verdade porque a rotina agora confere os NOMES das colunas, e nao so quantas
+# sao: um cabecalho generico ("c0;c1;...") deve mesmo ser rejeitado.
+CAB_ANP = [
+    "Ano", "Mes", "Agente Regulado", "Codigo do Produto", "Nome do Produto",
+    "Descricao do Produto", "Regiao Origem", "UF Origem", "Regiao Destinatario",
+    "UF Destino", "Mercado Destinatario", "Quantidade de Produto (mil m3)",
+    "extra1", "extra2", "extra3",
+]
+CAB = ";".join(CAB_ANP)
 
 
-def csv_bytes(*linhas):
-    return ("\n".join([CAB, *linhas]) + "\n").encode("latin-1")
+def csv_bytes(*linhas, cabecalho=CAB):
+    return ("\n".join([cabecalho, *linhas]) + "\n").encode("latin-1")
 
 
 def linha(ano=2026, mes=5, comp="DISTRIB A", uf="SP", mkt="TRR",

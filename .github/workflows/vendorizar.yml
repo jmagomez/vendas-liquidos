@@ -1,0 +1,67 @@
+name: Versiona Chart.js em vendor/
+
+# Roda sob demanda (Actions -> este workflow -> "Run workflow"), normalmente uma
+# vez so. O dashboard e aberto de dentro de rede corporativa, onde CDN costuma
+# estar bloqueado; com a copia versionada aqui a pagina para de depender do
+# jsdelivr. O index.html tenta vendor/ primeiro e so entao o CDN, entao rodar
+# isto e opcional -- e recomendado.
+#
+# O download vem do registro do npm via `npm pack`, que valida o pacote pelo
+# integrity hash publicado. Buscar direto de um CDN nao daria essa garantia.
+
+on:
+  workflow_dispatch:
+    inputs:
+      versao:
+        description: "Versão do Chart.js"
+        required: true
+        default: "4.4.1"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vendorizar
+  cancel-in-progress: false
+
+jobs:
+  vendorizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Baixa e versiona
+        env:
+          VERSAO: ${{ inputs.versao }}
+        run: |
+          set -euo pipefail
+          mkdir -p vendor _tmp && cd _tmp
+          npm pack "chart.js@${VERSAO}"
+          tar xzf "chart.js-${VERSAO}.tgz"
+          test -f package/dist/chart.umd.js
+          cd ..
+          # O sourceMappingURL aponta para um .map que nao vamos versionar; sem
+          # remover, o devtools de quem abrir a pagina leva 404 em todo load.
+          grep -v 'sourceMappingURL' _tmp/package/dist/chart.umd.js > vendor/chart.umd.js
+          rm -rf _tmp
+          echo "Chart.js ${VERSAO} -> vendor/chart.umd.js ($(wc -c < vendor/chart.umd.js) bytes)"
+          # Sanidade minima: tem de ser o UMD do Chart.js, nao uma pagina de erro.
+          grep -q "Chart.js v${VERSAO}" vendor/chart.umd.js
+          grep -q "window.Chart" vendor/chart.umd.js
+
+      - name: Commita
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add vendor/chart.umd.js
+          if git diff --cached --quiet; then
+            echo "::notice::vendor/chart.umd.js já está nesta versão."
+            exit 0
+          fi
+          git commit -m "Versiona Chart.js ${{ inputs.versao }} em vendor/"
+          git push
