@@ -16,22 +16,29 @@ vendas-liquidos/
 ├── index.html                # dashboard (GitHub Pages)
 ├── vendor/chart.umd.js       # Chart.js versionado (gerado pelo workflow vendorizar)
 └── .github/workflows/
-    ├── update-dashboard.yml  # rotina (dias 5 e 20) + e-mail
+    ├── update-dashboard.yml  # rotina (dias 5 e 28) + e-mail
     ├── vendorizar.yml        # sob demanda: baixa o Chart.js para vendor/
     └── ci.yml                # ruff + pytest
 ```
 
 ## Rotina automática
 
-Nos dias 5 e 20 de cada mês (9h de Brasília), o GitHub Actions baixa o
+Nos dias 5 e 28 de cada mês (9h de Brasília), o GitHub Actions baixa o
 `Liquidos_Vendas_Atual.csv` da ANP, regenera o `data.js`, commita e envia
 um resumo por e-mail com link para o dashboard.
 
 São duas passadas de propósito: **a ANP não fecha o mês anterior no dia 5**. Os
 agentes ainda estão dentro do prazo de declaração, e o arquivo já lista o mês
-corrente com as poucas entregas antecipadas. A rodada do dia 20 é a que costuma
-pegar o mês anterior consolidado; a do dia 5 recolhe revisões e serve de rede se
-a do dia 20 falhar.
+corrente com as poucas entregas antecipadas.
+
+A janela de consolidação foi medida no histórico deste repositório: em
+**18/jul/2026 o arquivo não trazia junho; em 30/jul/2026 junho já estava
+completo**. A ANP fecha o mês M na segunda metade de M+1 — por isso a rodada do
+dia 28, que é a que costuma pegar o mês consolidado; a do dia 5 recolhe revisões
+e serve de rede se a do dia 28 tiver pego o mês ainda em formação.
+
+28 e não 30 de propósito: 29, 30 e 31 não existem em todo mês, e um cron nesses
+dias não dispara em fevereiro. 28 é o último dia presente nos doze meses.
 
 Para o envio de e-mail funcionar, configure os secrets `MAIL_USERNAME` e
 `MAIL_PASSWORD_ANP` (senha de app do Gmail) em Settings → Secrets and variables → Actions.
