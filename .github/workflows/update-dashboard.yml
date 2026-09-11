@@ -4,11 +4,20 @@ on:
   schedule:
     # Duas passadas por mês. A ANP não fecha o mês anterior no dia 5: os agentes
     # ainda estão dentro do prazo de declaração, e o Liquidos_Vendas_Atual.csv
-    # já lista o mês corrente com as poucas entregas antecipadas. A rodada do
-    # dia 20 é a que costuma pegar o mês anterior consolidado; a do dia 5 pega
-    # revisões e serve de rede se a do dia 20 falhar.
+    # já lista o mês corrente com as poucas entregas antecipadas.
+    #
+    # A janela de consolidação foi medida no histórico deste repositório: em
+    # 18/jul/2026 o arquivo não trazia junho; em 30/jul/2026 junho já estava
+    # completo. Ou seja, a ANP fecha o mês M na SEGUNDA METADE de M+1 — daí a
+    # rodada do dia 28, que é a que costuma pegar o mês consolidado.
+    #
+    # 28 e não 30 de propósito: 29, 30 e 31 não existem em todo mês, e um cron
+    # nesses dias simplesmente não dispara em fevereiro. 28 é o último dia que
+    # existe nos doze meses, então a passada tardia roda o ano inteiro.
+    # A do dia 5 continua servindo de rede: recolhe revisões da ANP e repete se
+    # a do dia 28 tiver pego o mês ainda em formação.
     - cron: "0 12 5 * *"    # dia 5, 12:00 UTC (9h em Brasília)
-    - cron: "0 12 20 * *"   # dia 20, 12:00 UTC
+    - cron: "0 12 28 * *"   # dia 28, 12:00 UTC — último dia presente em todo mês
   workflow_dispatch: {}     # permite rodar manualmente na aba Actions
 
 permissions:
@@ -103,7 +112,7 @@ jobs:
             <p><a href="https://jmagomez.github.io/vendas-liquidos/">Abrir o dashboard completo</a>
             (vendas mensais com média móvel 12m, variação a/a, mix por combustível e por tipo de
             consumidor, ranking de companhias, concentração e exportação em CSV)</p>
-            <p style="color:#888;font-size:12px">Rotina automática (dias 5 e 20) via GitHub Actions · dados abertos da ANP</p>
+            <p style="color:#888;font-size:12px">Rotina automática (dias 5 e 28) via GitHub Actions · dados abertos da ANP</p>
 
       - name: Notifica falha por e-mail
         if: failure() && steps.mail.outputs.ok == 'true'
