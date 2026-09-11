@@ -122,10 +122,12 @@ meses sobre o mesmo gráfico e o painel de variação a/a.
 
 ### Quantidades negativas
 
-O arquivo da ANP traz ~185 linhas com quantidade negativa em 116 meses, somando
-−11 mil m³ contra 1,3 milhão de volume total, distribuídas por todos os anos. São
-estornos publicados pela própria agência: entram na soma e ficam contados no log,
-porque um *salto* nessa contagem seria sinal de outra coisa.
+A execução de 2026-09-11 contou **448 linhas negativas em 1.033.272** (0,04%),
+distribuídas por todos os anos; agregadas, somam −11 mil m³ contra 1,3 milhão de
+volume total. São estornos publicados pela própria agência: entram na soma e
+ficam contados no log, porque um *salto* nessa contagem seria sinal de outra
+coisa. (O número antigo aqui, "~185", contava combinações agregadas negativas no
+`data.js`, não linhas do CSV — duas coisas diferentes.)
 
 ## Leitura do dashboard
 
