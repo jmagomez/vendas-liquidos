@@ -4,19 +4,53 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vendas de Combustíveis Líquidos — Dashboard</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="data.js"></script>
+<!-- Favicon embutido: sem ele o navegador pedia /favicon.ico e levava 404 em
+     todo carregamento, sujando o console de quem for depurar a pagina. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230d1117'/%3E%3Crect x='3' y='8' width='2.5' height='5' fill='%2358a6ff'/%3E%3Crect x='6.75' y='5' width='2.5' height='8' fill='%2358a6ff'/%3E%3Crect x='10.5' y='3' width='2.5' height='10' fill='%233fb950'/%3E%3C/svg%3E">
+<!--
+  Chart.js: tenta primeiro a copia versionada no proprio repositorio e so entao
+  o CDN. O dashboard e aberto de dentro de rede corporativa, onde jsdelivr
+  costuma estar bloqueado, e antes disso um CDN inacessivel devolvia uma pagina
+  em branco sem uma linha de erro. Se nenhum dos dois carregar, a pagina diz.
+  Para gerar vendor/chart.umd.js: Actions -> "Versiona Chart.js em vendor/".
+-->
+<script>
+(function(){
+  function carregar(src, ok, falha){
+    var s = document.createElement('script');
+    s.src = src;
+    s.async = false;                 // preserva a ordem de execucao
+    s.onload = ok; s.onerror = falha;
+    document.head.appendChild(s);
+  }
+  window.__chartPronto = new Promise(function(resolve){
+    carregar('vendor/chart.umd.js', resolve, function(){
+      carregar('https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
+               resolve, function(){ window.__semChart = 1; resolve(); });
+    });
+  });
+})();
+</script>
+<script src="data.js" onerror="window.__semDados=1"></script>
 <style>
-  :root { --bg:#0d1117; --card:#161b22; --border:#30363d; --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --gold:#d29922; --up:#3fb950; }
+  :root { --bg:#0d1117; --card:#161b22; --border:#30363d; --text:#e6edf3; --muted:#8b949e;
+          --accent:#58a6ff; --gold:#d29922; --up:#3fb950; --down:#f85149; --parcial:#d29922; }
   * { margin:0; padding:0; box-sizing:border-box; }
   body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; padding:24px; }
   .container { max-width:1100px; margin:0 auto; }
   header { display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
   h1 { font-size:1.4rem; } h1 .tick { color:var(--accent); }
-  .period { color:var(--muted); font-size:.85rem; }
-  .filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin-bottom:16px; }
+  .period { color:var(--muted); font-size:.85rem; text-align:right; }
+  .period b { color:var(--text); font-weight:600; }
+  .filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin-bottom:10px; }
   .filter label { display:block; color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; margin-bottom:4px; }
   .filter select { width:100%; background:var(--card); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:9px 10px; font-size:.9rem; }
+  .barra-acoes { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:16px; }
+  .chk { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:.78rem; cursor:pointer; }
+  .chk input { accent-color:var(--accent); }
+  button.acao { background:var(--card); color:var(--text); border:1px solid var(--border); border-radius:8px;
+    padding:7px 14px; font-size:.78rem; cursor:pointer; font-family:inherit; }
+  button.acao:hover { border-color:var(--accent); color:var(--accent); }
   .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:16px; }
   .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
   .card .label { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
@@ -24,7 +58,7 @@
   .card .sub { color:var(--muted); font-size:.73rem; margin-top:2px; }
   .panel { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:18px; margin-bottom:16px; }
   .panel h2 { font-size:1rem; color:var(--muted); font-weight:500; margin-bottom:4px; }
-  .panel .note { color:var(--muted); font-size:.73rem; margin-bottom:10px; }
+  .panel .note { color:var(--muted); font-size:.73rem; margin-bottom:10px; line-height:1.45; }
   .mix-tabs { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
   .mix-tabs button { background:transparent; color:var(--muted); border:1px solid rgba(139,148,158,.3);
     border-radius:999px; padding:4px 12px; font-size:.73rem; cursor:pointer; font-family:inherit; }
@@ -34,10 +68,38 @@
   .ytd .box .label { color:var(--muted); font-size:.68rem; text-transform:uppercase; letter-spacing:.05em; }
   .ytd .box .value { font-size:1.05rem; font-weight:600; margin-top:2px; }
   .ytd .box .sub { color:var(--muted); font-size:.7rem; margin-top:1px; }
-  footer { color:var(--muted); font-size:.78rem; text-align:center; margin-top:24px; }
+  .up { color:var(--up); } .down { color:var(--down); }
+  .aviso { padding:10px 14px; border-radius:8px; margin-bottom:16px; font-size:.8rem; line-height:1.5; }
+  .aviso.parcial { background:rgba(210,153,34,.09); border:1px solid rgba(210,153,34,.4); color:#e3b341; }
+  .aviso.erro { background:rgba(248,81,73,.08); border:1px solid rgba(248,81,73,.35); color:#f0a89f; }
+  footer { color:var(--muted); font-size:.78rem; text-align:center; margin-top:24px; line-height:1.6; }
   .chart-box { position:relative; width:100%; }
+  .chart-box.h-sm { height:240px; }
   .chart-box.h-md { height:340px; }
   .chart-box.h-pie { height:380px; }
+  .duplo { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  .tabela-wrap { overflow-x:auto; }
+  table.rank { width:100%; border-collapse:collapse; font-size:.8rem; font-variant-numeric:tabular-nums; }
+  table.rank th { text-align:right; color:var(--muted); font-weight:500; font-size:.7rem; text-transform:uppercase;
+    letter-spacing:.04em; padding:6px 8px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  table.rank th:first-child, table.rank td:first-child { text-align:left; }
+  table.rank td { padding:6px 8px; border-bottom:1px solid rgba(48,54,61,.5); white-space:nowrap; }
+  table.rank tr:last-child td { border-bottom:none; }
+  table.rank tr.outras td { color:var(--muted); font-style:italic; }
+  @media (max-width:860px) { .duplo { grid-template-columns:1fr; } }
+  /* Impressao / PDF: este painel vira anexo de nota tecnica, e fundo escuro em
+     papel gasta toner e sai ilegivel. Inverte para tinta sobre branco, tira os
+     controles (que nao funcionam no papel) e evita quebrar um painel ao meio. */
+  @media print {
+    :root { --bg:#fff; --card:#fff; --border:#c9d1d9; --text:#0d1117; --muted:#57606a;
+            --accent:#0550ae; --gold:#9a6700; --up:#116329; --down:#a40e26; }
+    body { padding:0; }
+    .filters, .barra-acoes, .mix-tabs { display:none !important; }
+    .panel, .card { break-inside:avoid; page-break-inside:avoid; border:1px solid var(--border); }
+    .aviso.parcial { border:1px solid var(--gold); color:#7a4f01; }
+    a { color:inherit; text-decoration:none; }
+    table.rank td, table.rank th { border-color:#d0d7de; }
+  }
   @media (max-width:640px) {
     body { padding:12px; }
     .panel { padding:12px; }
@@ -47,6 +109,7 @@
     .card .value { font-size:1.02rem; }
     .chart-box.h-md { height:280px; }
     .chart-box.h-pie { height:340px; }
+    .chart-box.h-sm { height:220px; }
   }
 </style>
 </head>
@@ -57,6 +120,10 @@
     <span class="period" id="periodTxt"></span>
   </header>
 
+  <div id="erroFatal" class="aviso erro" style="display:none"></div>
+  <div id="avisoParcial" class="aviso parcial" style="display:none"></div>
+
+  <div id="app">
   <div class="filters">
     <div class="filter"><label for="fComp">Companhia</label><select id="fComp"></select></div>
     <div class="filter"><label for="fUf">Estado (UF destino)</label><select id="fUf"></select></div>
@@ -66,20 +133,34 @@
     <div class="filter"><label for="fFim">Período final</label><select id="fFim"></select></div>
     <div class="filter"><label for="fMes">Mês (sazonalidade)</label><select id="fMes"></select></div>
   </div>
-  <div id="faixaVazia" class="note" style="display:none;background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.35);color:#f0a89f;padding:8px 12px;border-radius:8px;margin-bottom:16px"></div>
+  <div class="barra-acoes">
+    <label class="chk" id="boxGrupo" title="Consolida razões sociais do mesmo grupo econômico (hoje: Raízen S.A. + Raízen Mime)">
+      <input type="checkbox" id="fGrupo"> Consolidar por grupo econômico
+    </label>
+    <button type="button" class="acao" id="btnCsv">Exportar recorte (CSV)</button>
+  </div>
+  <div id="faixaVazia" class="aviso erro" style="display:none"></div>
 
   <div class="cards">
     <div class="card"><div class="label">Volume total</div><div class="value" id="cTot"></div><div class="sub">mil m³ no período filtrado</div></div>
     <div class="card"><div class="label">Média mensal</div><div class="value" id="cAvg"></div><div class="sub">mil m³ por mês</div></div>
     <div class="card"><div class="label">Melhor mês</div><div class="value" id="cBest"></div><div class="sub" id="cBestSub"></div></div>
-    <div class="card"><div class="label">Companhias ativas</div><div class="value" id="cComp"></div><div class="sub" id="cCompSub"></div></div>
+    <div class="card"><div class="label" id="cCompLabel">Companhias ativas</div><div class="value" id="cComp"></div><div class="sub" id="cCompSub"></div></div>
   </div>
 
   <div class="panel">
-    <h2>Vendas mensais (mil m³)</h2>
+    <h2>Vendas mensais (mil m³) e média móvel de 12 meses</h2>
     <div class="note" id="chartNote"></div>
     <div class="ytd" id="ytdBox"></div>
     <div class="chart-box h-md"><canvas id="monthChart"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>Variação anual (%)</h2>
+    <div class="note">Cada mês contra o mesmo mês do ano anterior. Numa série com sazonalidade de safra,
+      entressafra e dias úteis, a variação contra o mês imediatamente anterior mistura tendência com
+      calendário; a comparação a/a isola o que mudou de fato. Meses não consolidados ficam fora.</div>
+    <div class="chart-box h-sm"><canvas id="yoyChart"></canvas></div>
   </div>
 
   <div class="panel">
@@ -94,13 +175,82 @@
 
   <div class="panel">
     <h2>Participação por companhia</h2>
-    <div class="note">4 maiores em destaque · top 12 companhias + demais agregadas · respeita filtros de estado, tipo de consumidor, combustível e período (não o de companhia)</div>
+    <div class="note">4 maiores em destaque · top 12 companhias + demais agregadas · respeita filtros de estado,
+      tipo de consumidor, combustível e período (não o de companhia)</div>
     <div class="chart-box h-pie"><canvas id="pieChart"></canvas></div>
+    <div class="note" style="margin-top:14px" id="rankNote"></div>
+    <div class="tabela-wrap">
+      <table class="rank" id="tabelaRank">
+        <thead><tr>
+          <th>Companhia</th><th>Volume (mil m³)</th><th>Part.</th>
+          <th>Part. 12m antes</th><th>Δ p.p.</th><th>Var. volume</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Estrutura de mercado</h2>
+    <div class="note" id="estruturaNote"></div>
+    <div class="duplo">
+      <div>
+        <div class="note"><b>Concentração (HHI)</b> — soma dos quadrados das participações, em pontos.
+          Calculado sobre o recorte de estado, tipo de consumidor e combustível, ignorando o filtro de
+          companhia. Referência antitruste usual: abaixo de 1.500 desconcentrado, 1.500–2.500 moderado.</div>
+        <div class="chart-box h-sm"><canvas id="hhiChart"></canvas></div>
+      </div>
+      <div>
+        <div class="note"><b>Etanol hidratado no ciclo Otto</b> — etanol ÷ (etanol + gasolina C), em volume.
+          Mede a substituição na bomba; responde à paridade de preço na bomba e à safra de cana.
+          Ignora o filtro de combustível.</div>
+        <div class="chart-box h-sm"><canvas id="ottoChart"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Cobertura da base — agentes declarantes por mês</h2>
+    <div class="note" id="coberturaNote"></div>
+    <div class="note">Número de agentes regulados com venda declarada em cada mês. Não é um indicador
+      de mercado: é o indicador de <b>qualidade do dado</b>. Foi a queda dessa série — de ~150 agentes
+      para 3 — que denunciou agosto/2026, e uma queda dela em qualquer mês significa arquivo da ANP
+      incompleto, não distribuidora saindo do mercado. Respeita os filtros de estado, tipo de consumidor
+      e combustível; ignora o de companhia. Barras âmbar: meses não consolidados.</div>
+    <div class="chart-box h-sm"><canvas id="cobChart"></canvas></div>
+  </div>
   </div>
 
   <footer id="footerTxt"></footer>
 </div>
 <script>
+"use strict";
+
+// ===== guardas de carregamento ==============================================
+// Antes, um data.js ausente estourava em `D.rows` e deixava a pagina em branco;
+// um Chart.js bloqueado fazia o mesmo. Silencio nao e um estado aceitavel para
+// um painel que alguem usa para decidir alguma coisa.
+function fatal(msg){
+  const box = document.getElementById('erroFatal');
+  box.innerHTML = msg;
+  box.style.display = 'block';
+  document.getElementById('app').style.display = 'none';
+}
+(window.__chartPronto || Promise.resolve()).then(function(){
+  if (window.__semDados || !window.VENDAS || !Array.isArray(window.VENDAS.rows)) {
+    fatal('<b>Não consegui carregar os dados (data.js).</b> Se você abriu o arquivo direto do disco, '
+        + 'sirva a pasta por HTTP (<code>python -m http.server</code>) ou use '
+        + '<a href="https://jmagomez.github.io/vendas-liquidos/" style="color:inherit">a versão publicada</a>.');
+  } else if (window.__semChart || typeof Chart === 'undefined') {
+    fatal('<b>Não consegui carregar a biblioteca de gráficos.</b> Nem a cópia local '
+        + '(<code>vendor/chart.umd.js</code>) nem o CDN responderam — provavelmente a rede bloqueia '
+        + 'o CDN e o <code>vendor/</code> ainda não foi gerado (Actions → "Versiona Chart.js em vendor/").');
+  } else {
+    iniciar();
+  }
+});
+
+function iniciar(){
 const D = window.VENDAS;
 const R = D.rows, NR = R.length;
 
@@ -114,22 +264,160 @@ const I_MES = CAMPOS.indexOf('mes'), I_COMP = CAMPOS.indexOf('comp'),
       I_UF = CAMPOS.indexOf('uf'), I_MKT = CAMPOS.indexOf('mkt'),
       I_QTD = CAMPOS.indexOf('qtd'), I_PROD = CAMPOS.indexOf('prod');
 const TEM_PROD = I_PROD !== -1 && Array.isArray(D.prods) && D.prods.length > 0;
+const NM = D.months.length;
 const el = id => document.getElementById(id);
 const nf = new Intl.NumberFormat('pt-BR', {maximumFractionDigits:0});
 const nf1 = new Intl.NumberFormat('pt-BR', {maximumFractionDigits:1});
+// Casa decimal fixa para as colunas da tabela: "16%" e "16,2%" lado a lado
+// desalinham a virgula e atrapalham a leitura vertical de uma coluna de shares.
+const nfp = new Intl.NumberFormat('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1});
 const MOBILE = window.matchMedia('(max-width:640px)').matches;
 if (MOBILE) Chart.defaults.font.size = 10;
-Chart.defaults.color='#8b949e'; Chart.defaults.borderColor='rgba(139,148,158,.15)';
 
-el('periodTxt').textContent = `${D.months[0]} a ${D.months[D.months.length-1]} · fonte: ANP`;
-el('footerTxt').textContent = `Dados de vendas de combustíveis líquidos por agente regulado (ANP) · volumes em mil m³ · agregado por mês, companhia, UF de destino e mercado destinatário`;
+// O CSS troca o tema no @media print, mas o Chart.js pinta eixos, legendas e os
+// rotulos dentro das fatias em canvas -- CSS nao alcanca. Sem repintar, o painel
+// impresso sai com texto cinza-claro sobre branco e os rotulos externos da pizza
+// somem completamente. Estas duas paletas sao trocadas nos eventos de impressao.
+const TEMA = {
+  tela:    { texto:'#8b949e', grade:'rgba(139,148,158,.15)', dentro:'#0d1117', fora:'#e6edf3' },
+  papel:   { texto:'#24292f', grade:'rgba(27,31,36,.15)',    dentro:'#ffffff', fora:'#24292f' },
+};
+let tema = TEMA.tela;
+function aplicarTema(novo){
+  tema = novo;
+  Chart.defaults.color = novo.texto;
+  Chart.defaults.borderColor = novo.grade;
+  for (const c of Object.values(Chart.instances)) c.update('none');
+}
+aplicarTema(TEMA.tela);
+window.addEventListener('beforeprint', () => aplicarTema(TEMA.papel));
+window.addEventListener('afterprint', () => aplicarTema(TEMA.tela));
 
-// ===== filtros =====
+// ===== meses nao consolidados ===============================================
+// O Liquidos_Vendas_Atual.csv lista o mes corrente assim que o primeiro agente
+// entrega a declaracao. Em 2026-09-05 agosto entrou com 71 mil m3 de tres
+// distribuidoras -- 0,6% de um mes normal. Esses meses continuam VISIVEIS (quem
+// audita precisa ver o que a ANP publicou) e ficam fora de toda media,
+// acumulado, media movel, variacao a/a, mix, pizza, ranking e HHI: um mes com
+// 0,6% da amostra nao e um ponto pequeno da serie, e um ponto de outra serie.
+//
+// A marca vem do gerador (`data.js["parciais"]`), que e a fonte de verdade. Mas
+// o gerador e um job que pode falhar, e um data.js antigo simplesmente nao tem a
+// chave -- foi exatamente assim que agosto entrou no ar. Entao, e SO nesse caso,
+// o painel aplica a mesma regra por conta propria: um mes da ponta cujo volume
+// ou numero de agentes fique abaixo de 60% da mediana dos 12 meses anteriores.
+// Duas implementacoes da mesma regra e um custo aceitavel aqui, porque a
+// alternativa e o painel confiar cegamente num arquivo que pode estar velho.
+function detectarParciais(){
+  const vol = new Float64Array(NM);
+  const agentes = Array.from({length:NM}, () => new Set());
+  for (let i=0;i<NR;i+=P){
+    const m = R[i+I_MES];
+    vol[m] += R[i+I_QTD]/10000;
+    agentes[m].add(R[i+I_COMP]);
+  }
+  const mediana = arr => {
+    const s = [...arr].sort((a,b)=>a-b);
+    const n = s.length;
+    return n % 2 ? s[(n-1)/2] : (s[n/2-1] + s[n/2]) / 2;
+  };
+  const achados = [];
+  for (let i=NM-1;i>0;i--){
+    const ini = Math.max(0, i-12);
+    const janela = [];
+    for (let j=ini;j<i;j++) janela.push(j);
+    if (janela.length < 3) break;
+    const volBase = mediana(janela.map(j=>vol[j]));
+    const agBase = mediana(janela.map(j=>agentes[j].size));
+    if (!((volBase > 0 && vol[i] < 0.6*volBase) ||
+          (agBase > 0 && agentes[i].size < 0.6*agBase))) break;
+    achados.push(D.months[i]);
+    if (achados.length > 3) return [];   // ponta inteira magra: nao e a ponta
+  }
+  return achados;
+}
+const PARCIAIS = new Set(Array.isArray(D.parciais) ? D.parciais : detectarParciais());
+const EH_PARCIAL = new Uint8Array(NM);
+D.months.forEach((m,i) => { if (PARCIAIS.has(m)) EH_PARCIAL[i] = 1; });
+const N_PARCIAIS = EH_PARCIAL.reduce((a,b)=>a+b, 0);
+const IDX_ULTIMO_COMPLETO = (() => {
+  for (let i = NM-1; i >= 0; i--) if (!EH_PARCIAL[i]) return i;
+  return -1;
+})();
+
+if (N_PARCIAIS) {
+  const lista = D.months.filter((_,i)=>EH_PARCIAL[i]);
+  el('avisoParcial').innerHTML =
+    `<b>${lista.join(', ')} ainda não ${lista.length>1?'foram consolidados':'foi consolidado'} pela ANP.</b> `
+    + `O arquivo já traz ${lista.length>1?'esses meses':'esse mês'}, mas com uma fração dos agentes declarantes — `
+    + `as grandes distribuidoras ainda estão dentro do prazo de envio. `
+    + `${lista.length>1?'Eles aparecem':'Ele aparece'} em âmbar no gráfico mensal e ${lista.length>1?'estão':'está'} fora de `
+    + `todas as médias, acumulados, comparações e do ranking. Último mês fechado: `
+    + `<b>${IDX_ULTIMO_COMPLETO >= 0 ? D.months[IDX_ULTIMO_COMPLETO] : '—'}</b>.`;
+  el('avisoParcial').style.display = 'block';
+}
+
+el('periodTxt').innerHTML =
+  `${D.months[0]} a <b>${IDX_ULTIMO_COMPLETO >= 0 ? D.months[IDX_ULTIMO_COMPLETO] : D.months[NM-1]}</b> consolidado`
+  + (D.updated ? ` · coletado em ${D.updated}` : '') + `<br>fonte: ANP · volumes em mil m³`;
+// Proveniencia: de que arquivo da ANP saiu este data.js. Quando um numero do
+// painel for contestado, e esta a primeira pergunta -- e sem o registro nao ha
+// como reproduzir nem auditar a rodada. Arquivos gerados antes desta marca nao
+// tem a chave; a linha simplesmente nao aparece.
+const F = D.fonte;
+const proveniencia = F ? '<br>Origem: <code>Liquidos_Vendas_Atual.csv</code> · sha256 '
+  + `<code>${String(F.sha256 || '?')}</code>`
+  + (F.bytes ? ` · ${nf.format(F.bytes/1e6)} MB` : '')
+  + (F.linhas ? ` · ${nf.format(F.linhas)} linhas lidas` : '')
+  + (F.descartadas ? ` · ${nf.format(F.descartadas)} descartadas` : '')
+  + (F.baixado_em ? ` · baixado em ${F.baixado_em}` : '') : '';
+el('footerTxt').innerHTML =
+  'Vendas de combustíveis líquidos por agente regulado — dados abertos da ANP · volumes em mil m³, '
+  + 'agregados por mês, companhia, UF de destino, mercado destinatário e produto.<br>'
+  + 'A UF "NI" corresponde a destino não informado na declaração. Quantidades negativas são estornos '
+  + 'publicados pela própria ANP e entram na soma.'
+  + proveniencia;
+
+// ===== grupo economico ======================================================
+// A ANP identifica o AGENTE REGULADO (um CNPJ), nao o grupo. Raizen declara por
+// duas razoes sociais; somadas, o grupo passa a Ipiranga no acumulado da serie
+// (18,2% contra 18,1%) -- a leitura de lideranca muda conforme a unidade de
+// analise, e o dashboard tem de deixar escolher qual. O mapa e curto e manual
+// de proposito: consolidar por semelhanca de nome juntaria homonimos que nao
+// tem nada a ver um com o outro. O caminho definitivo e mapear por CNPJ.
+const GRUPOS = { 'RAIZEN MIME COMBUSTIVEIS S/A.': 'RAIZEN S.A.' };
+const temGrupo = D.comps.some(c => GRUPOS[c]);
+if (!temGrupo) el('boxGrupo').style.display = 'none';
+
+const gNomes = [], gIndice = new Map();
+const gMap = new Int32Array(D.comps.length);
+D.comps.forEach((nome, i) => {
+  const alvo = GRUPOS[nome] || nome;
+  if (!gIndice.has(alvo)) { gIndice.set(alvo, gNomes.length); gNomes.push(alvo); }
+  gMap[i] = gIndice.get(alvo);
+});
+const porGrupo = () => temGrupo && el('fGrupo').checked;
+const nomesComp = () => porGrupo() ? gNomes : D.comps;
+const idComp = c => porGrupo() ? gMap[c] : c;
+
+// ===== filtros ==============================================================
 function fillSelect(id, items, allLabel){
   const s = el(id);
   s.innerHTML = `<option value="-1">${allLabel}</option>` + items.map((v,i)=>`<option value="${i}">${v}</option>`).join('');
 }
-fillSelect('fComp', D.comps, 'Todas as companhias');
+// A selecao de companhia e guardada pelo NOME, nao pelo indice do <select>:
+// ligar/desligar o agrupamento por grupo economico reordena a lista inteira, e
+// um indice guardado passaria a apontar para outra companhia sem avisar.
+// Guardar fora do DOM tambem evita ler `.value` de um <select> ainda vazio --
+// `+''` e 0, e o painel abria filtrado na primeira distribuidora da lista.
+let compSelecionada = null;   // null = todas as companhias
+function preencherCompanhias(){
+  fillSelect('fComp', nomesComp(), 'Todas as companhias');
+  const i = compSelecionada === null ? -1 : nomesComp().indexOf(compSelecionada);
+  if (i < 0) compSelecionada = null;
+  el('fComp').value = String(i < 0 ? -1 : i);
+}
+preencherCompanhias();
 fillSelect('fUf', D.ufs, 'Todos os estados');
 fillSelect('fMkt', D.mkts, 'Todos os tipos');
 if (TEM_PROD) fillSelect('fProd', D.prods, 'Todos os combustíveis');
@@ -140,18 +428,19 @@ const fProd = () => TEM_PROD ? +el('fProd').value : -1;
 // porque o intervalo cheio (primeiro ao ultimo) ja e o padrao.
 const MESES_PT = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 function fillMeses(id, sel){
-  el(id).innerHTML = D.months.map((m,i)=>`<option value="${i}">${m}</option>`).join('');
+  el(id).innerHTML = D.months.map((m,i)=>
+    `<option value="${i}">${m}${EH_PARCIAL[i] ? ' (não consolidado)' : ''}</option>`).join('');
   el(id).value = sel;
 }
 fillMeses('fIni', 0);
-fillMeses('fFim', D.months.length-1);
+fillMeses('fFim', NM-1);
 
 // Mes do calendario: recorta o mesmo mes em todos os anos, para comparar
 // sazonalidade. Complementa o intervalo em vez de duplicar.
 el('fMes').innerHTML = '<option value="-1">Todos os meses</option>' +
   MESES_PT.map((m,i)=>`<option value="${i+1}">${m}</option>`).join('');
 
-// ===== recorte temporal =====
+// ===== recorte temporal =====================================================
 // Tolera inversao: se o inicio vier depois do fim, os dois trocam de lugar em
 // vez de zerar a tela sem explicacao.
 function faixa(){
@@ -159,44 +448,96 @@ function faixa(){
   return a <= b ? [a,b] : [b,a];
 }
 
+// `ativos` marca os meses do recorte que ENTRAM nas contas: os parciais nunca
+// entram, mesmo estando dentro do intervalo escolhido.
 function mesesAtivos(){
   const [a,b] = faixa();
   const mc = +el('fMes').value;
-  const ativos = new Uint8Array(D.months.length);
+  const ativos = new Uint8Array(NM);
   for (let i=a;i<=b;i++){
+    if (EH_PARCIAL[i]) continue;
     if (mc === -1 || (+D.months[i].slice(5,7)) === mc) ativos[i] = 1;
   }
   return ativos;
 }
 
-// ===== agregação =====
+// ===== agregação ============================================================
 function aggregate(){
   const fc = +el('fComp').value, fu = +el('fUf').value, fk = +el('fMkt').value;
   const ativos = mesesAtivos();
-  const byMonth = new Float64Array(D.months.length);
+  const nComps = nomesComp().length;
+  const byMonth = new Float64Array(NM);
+  // Serie do mes parcial, desenhada a parte: fica visivel no grafico sem entrar
+  // em nenhuma soma.
+  const byMonthParcial = new Float64Array(NM);
   // Mesma agregacao SEM o recorte temporal. A comparacao "mesma janela 12 meses
-  // antes" precisa ler meses que, por definicao, estao fora do recorte; usar
-  // byMonth ali daria zero -- ou pior, uma soma parcial que parece valida.
-  // Os filtros de companhia, UF e tipo continuam valendo nas duas.
-  const byMonthAll = new Float64Array(D.months.length);
-  const byCompPie = new Float64Array(D.comps.length); // ignora filtro de companhia
+  // antes" e a media movel precisam ler meses que, por definicao, estao fora do
+  // recorte; usar byMonth ali daria zero -- ou pior, uma soma parcial que
+  // parece valida. Os filtros de companhia, UF e tipo continuam valendo.
+  const byMonthAll = new Float64Array(NM);
+  const byCompPie = new Float64Array(nComps);     // ignora filtro de companhia
+  // Volume por companhia na janela selecionada e na mesma janela 12 meses
+  // antes: e o que o ranking compara. Tambem ignora o filtro de companhia.
+  const byCompPrev = new Float64Array(nComps);
+  // Companhia x mes, para o HHI mes a mes.
+  const compMes = new Float64Array(nComps * NM);
+  // Presenca (declarou ou nao) por companhia x mes, para a serie de cobertura.
+  // Cobre TODOS os meses, parciais inclusive -- e justamente neles que a serie
+  // precisa aparecer -- e ignora o filtro de companhia, senao a contagem seria
+  // sempre 1. Uint8Array em vez de Set por mes: uma escrita direta no lugar de
+  // 400 mil insercoes em tabela hash.
+  const presenca = new Uint8Array(nComps * NM);
+  // Etanol e gasolina por mes, para a penetracao no ciclo Otto.
+  const etanol = new Float64Array(NM), gasolina = new Float64Array(NM);
+  const iEtanol = TEM_PROD ? D.prods.indexOf('Etanol Hidratado') : -1;
+  const iGasolina = TEM_PROD ? D.prods.indexOf('Gasolina C') : -1;
   const compSet = new Set();
   let total = 0;
   const fp = fProd();
+  // Janela deslocada 12 meses, para o ranking. So vale se TODO mes do recorte
+  // tiver contraparte na base: com o intervalo cheio (2017-01 a 2026-07) os doze
+  // primeiros meses nao tem, e comparar 115 meses contra 103 produzia um "+11%"
+  // que era puro tamanho de janela, nao crescimento. Ou a base e completa, ou a
+  // coluna sai vazia.
+  const doze = new Uint8Array(NM);
+  let dozeOk = false;
+  for (let i=0;i<NM;i++) if (ativos[i]) { dozeOk = true; break; }
+  for (let i=0;i<NM && dozeOk;i++) if (ativos[i] && (i < 12 || EH_PARCIAL[i-12])) dozeOk = false;
+  if (dozeOk) for (let i=0;i<NM;i++) if (ativos[i]) doze[i-12] = 1;
+
   for (let i=0;i<NR;i+=P){
-    const m=R[i+I_MES], c=R[i+I_COMP], u=R[i+I_UF], k=R[i+I_MKT], q=R[i+I_QTD]/10000;
-    if (fp!==-1 && R[i+I_PROD]!==fp) continue;
+    const m=R[i+I_MES], u=R[i+I_UF], k=R[i+I_MKT], q=R[i+I_QTD]/10000;
     if (fu!==-1 && u!==fu) continue;
     if (fk!==-1 && k!==fk) continue;
+    const c = idComp(R[i+I_COMP]);
+    // O ciclo Otto ignora o filtro de combustivel de proposito: filtrar por
+    // diesel e continuar mostrando a razao etanol/gasolina seria uma razao
+    // calculada sobre nada.
+    if (!EH_PARCIAL[m] && (fc===-1 || c===fc)){
+      const prd = TEM_PROD ? R[i+I_PROD] : -1;
+      if (prd === iEtanol) etanol[m] += q;
+      else if (prd === iGasolina) gasolina[m] += q;
+    }
+    if (fp!==-1 && TEM_PROD && R[i+I_PROD]!==fp) continue;
+    presenca[c*NM + m] = 1;
+    if (EH_PARCIAL[m]){
+      if (fc===-1 || c===fc) byMonthParcial[m] += q;
+      continue;                       // nada de parcial entra nas somas abaixo
+    }
     if (fc===-1 || c===fc) byMonthAll[m] += q;
+    if (doze[m]) byCompPrev[c] += q;
     if (!ativos[m]) continue;
     byCompPie[c] += q;
+    compMes[c*NM + m] += q;
     if (fc!==-1 && c!==fc) continue;
     byMonth[m] += q;
     total += q;
     compSet.add(c);
   }
-  return {byMonth, byMonthAll, byCompPie, total, nComp: compSet.size, fc};
+  const cobertura = new Int32Array(NM);
+  for (let c=0;c<nComps;c++) for (let m=0;m<NM;m++) if (presenca[c*NM+m]) cobertura[m]++;
+  return {byMonth, byMonthParcial, byMonthAll, byCompPie, byCompPrev, compMes,
+          etanol, gasolina, cobertura, total, nComp: compSet.size, fc, ativos, doze, dozeOk};
 }
 
 // Mix ao longo do tempo, por tipo de consumidor ou por combustivel.
@@ -212,13 +553,12 @@ function aggregateMix(){
   const fp = porProd ? -1 : fProd();             // no modo tipo, o combustivel filtra
   const cats = porProd ? D.prods : D.mkts;
   const iCat = porProd ? I_PROD : I_MKT;
-  const nm = D.months.length;
   const ativos = mesesAtivos();
-  const m = Array.from({length:cats.length}, () => new Float64Array(nm));
+  const m = Array.from({length:cats.length}, () => new Float64Array(NM));
   for (let i=0;i<NR;i+=P){
     const mo=R[i+I_MES], q=R[i+I_QTD]/10000;
     if (!ativos[mo]) continue;
-    if (fc!==-1 && R[i+I_COMP]!==fc) continue;
+    if (fc!==-1 && idComp(R[i+I_COMP])!==fc) continue;
     if (fu!==-1 && R[i+I_UF]!==fu) continue;
     if (fk!==-1 && R[i+I_MKT]!==fk) continue;
     if (fp!==-1 && R[i+I_PROD]!==fp) continue;
@@ -227,7 +567,7 @@ function aggregateMix(){
   return {m, cats};
 }
 
-// ===== charts =====
+// ===== charts ===============================================================
 // 4 maiores em destaque (cores vivas + fatia deslocada); demais esmaecidas
 const PIE_TOP = ['#58a6ff','#3fb950','#d29922','#f85149'];
 const PIE_REST = ['rgba(188,140,255,.45)','rgba(57,197,207,.45)','rgba(255,155,206,.45)','rgba(158,206,106,.45)','rgba(224,175,104,.45)','rgba(122,162,247,.45)','rgba(247,118,142,.45)','rgba(115,218,202,.45)'];
@@ -236,10 +576,65 @@ const TOP_DESTAQUE = 4;
 
 const monthChart = new Chart(el('monthChart'), {
   type:'bar',
-  data:{ labels:D.months, datasets:[{ label:'Volume (mil m³)', data:[], backgroundColor:'rgba(88,166,255,.55)', borderRadius:2 }] },
+  data:{ labels:D.months, datasets:[
+    { label:'Volume (mil m³)', data:[], backgroundColor:'rgba(88,166,255,.55)', borderRadius:2, order:2 },
+    // Mes em formacao: mesma escala, cor de alerta, rotulo proprio. Antes o
+    // eixo Y comecava em 7.000 e uma barra de 71 mil m3 simplesmente sumia --
+    // o erro ficava invisivel justamente no mes em que era grave.
+    { label:'Mês não consolidado', data:[], backgroundColor:'rgba(210,153,34,.75)',
+      borderColor:'#d29922', borderWidth:1, borderRadius:2, order:2 },
+    { label:'Média móvel 12m', data:[], type:'line', borderColor:'#f0a89f', borderWidth:2,
+      pointRadius:0, tension:.25, spanGaps:false, order:1 },
+  ] },
   options:{ responsive:true, maintainAspectRatio:false,
-    plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>nf1.format(c.raw)+' mil m³'}} },
-    scales:{ x:{ticks:{maxTicksLimit:MOBILE?6:14}}, y:{ticks:{callback:v=>nf.format(v)}} } }
+    plugins:{ legend:{display:true, position:'bottom', labels:{boxWidth:12, font:{size:MOBILE?9:11}}},
+      tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${nf1.format(c.raw)} mil m³`}} },
+    // Barras SEMPRE a partir do zero. O eixo truncado em 7.000 dava zoom na
+    // variacao, mas barra codifica magnitude pelo comprimento: truncada, mente.
+    // Quem quer a variacao tem o painel de variacao a/a e a media movel.
+    scales:{ x:{ticks:{maxTicksLimit:MOBILE?6:14}}, y:{beginAtZero:true, ticks:{callback:v=>nf.format(v)}} } }
+});
+
+const yoyChart = new Chart(el('yoyChart'), {
+  type:'line',
+  data:{ labels:D.months, datasets:[{ label:'Variação a/a (%)', data:[], borderColor:'#58a6ff',
+    backgroundColor:'rgba(88,166,255,.12)', borderWidth:2, pointRadius:0, tension:.25, fill:true, spanGaps:false }] },
+  options:{ responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>`${nf1.format(c.raw)}% a/a`}} },
+    scales:{ x:{ticks:{maxTicksLimit:MOBILE?6:14}}, y:{ticks:{callback:v=>nf1.format(v)+'%'}, grid:{color:ctx=>ctx.tick.value===0?'rgba(139,148,158,.45)':'rgba(139,148,158,.12)'}} } }
+});
+
+const hhiChart = new Chart(el('hhiChart'), {
+  type:'line',
+  data:{ labels:D.months, datasets:[{ label:'HHI', data:[], borderColor:'#d29922',
+    backgroundColor:'rgba(210,153,34,.12)', borderWidth:2, pointRadius:0, tension:.25, fill:true, spanGaps:false }] },
+  options:{ responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>`HHI ${nf.format(c.raw)}`}} },
+    scales:{ x:{ticks:{maxTicksLimit:MOBILE?5:8}}, y:{beginAtZero:true, ticks:{callback:v=>nf.format(v)}} } }
+});
+
+const cobChart = new Chart(el('cobChart'), {
+  type:'bar',
+  data:{ labels:D.months, datasets:[
+    { label:'Agentes declarantes', data:[], backgroundColor:'rgba(88,166,255,.5)', borderRadius:1 },
+    { label:'Mês não consolidado', data:[], backgroundColor:'rgba(210,153,34,.85)',
+      borderColor:'#d29922', borderWidth:1, borderRadius:1 },
+  ] },
+  options:{ responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false},
+      tooltip:{callbacks:{label:c=>`${nf.format(c.raw)} agentes`
+        + (EH_PARCIAL[c.dataIndex] ? ' — mês não consolidado' : '')}} },
+    scales:{ x:{stacked:true, ticks:{maxTicksLimit:MOBILE?6:14}},
+             y:{stacked:true, beginAtZero:true, ticks:{callback:v=>nf.format(v)}} } }
+});
+
+const ottoChart = new Chart(el('ottoChart'), {
+  type:'line',
+  data:{ labels:D.months, datasets:[{ label:'Etanol / ciclo Otto', data:[], borderColor:'#3fb950',
+    backgroundColor:'rgba(63,185,80,.12)', borderWidth:2, pointRadius:0, tension:.25, fill:true, spanGaps:false }] },
+  options:{ responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{display:false}, tooltip:{callbacks:{label:c=>`${nf1.format(c.raw)}% do ciclo Otto`}} },
+    scales:{ x:{ticks:{maxTicksLimit:MOBILE?5:8}}, y:{beginAtZero:true, ticks:{callback:v=>nf1.format(v)+'%'}} } }
 });
 
 // rótulos fixos (nome + %) nas 4 maiores fatias
@@ -257,7 +652,7 @@ const pieLabels = {
       if (!arc) continue;
       const ang = (arc.startAngle + arc.endAngle) / 2;
       const pct = (data[i]/tot*100).toFixed(1) + '%';
-      const nome = String(chart.data.labels[i]).split(' ')[0];
+      const nome = apelido(String(chart.data.labels[i]));
       const pequena = (arc.endAngle - arc.startAngle) < 0.35; // fatia estreita: rótulo do lado de fora
       const r = pequena ? arc.outerRadius + (MOBILE?12:18) : (arc.innerRadius + arc.outerRadius) / 2;
       const x = arc.x + Math.cos(ang)*r, y = arc.y + Math.sin(ang)*r;
@@ -265,7 +660,7 @@ const pieLabels = {
       ctx.textAlign = pequena ? (Math.cos(ang) >= 0 ? 'left' : 'right') : 'center';
       ctx.textBaseline = 'middle';
       ctx.font = `bold ${fs}px 'Segoe UI',system-ui,sans-serif`;
-      ctx.fillStyle = pequena ? '#e6edf3' : '#0d1117';
+      ctx.fillStyle = pequena ? tema.fora : tema.dentro;
       ctx.fillText(nome, x, y - fs*0.65);
       ctx.fillText(pct, x, y + fs*0.65);
       ctx.restore();
@@ -308,16 +703,15 @@ const mixChart = new Chart(el('mixChart'), {
 
 function refreshMix(){
   const {m, cats} = aggregateMix();
-  const nm = D.months.length;
   // converte para participacao; mes sem venda no recorte fica nulo em vez de 0,
   // senao o grafico desenha uma queda para zero que nao existe.
-  const tot = new Float64Array(nm);
-  for (let k=0;k<cats.length;k++) for (let i=0;i<nm;i++) tot[i]+=m[k][i];
+  const tot = new Float64Array(NM);
+  for (let k=0;k<cats.length;k++) for (let i=0;i<NM;i++) tot[i]+=m[k][i];
   const ativos = [];
   for (let k=0;k<cats.length;k++) if (m[k].reduce((a,b)=>a+b,0) > 0) ativos.push(k);
   mixChart.data.datasets = ativos.map((k,idx)=>({
     label: cats[k],
-    data: Array.from({length:nm}, (_,i)=> tot[i]>0 ? m[k][i]/tot[i]*100 : null),
+    data: Array.from({length:NM}, (_,i)=> tot[i]>0 ? m[k][i]/tot[i]*100 : null),
     backgroundColor: MIX_CORES[idx % MIX_CORES.length],
     borderColor: MIX_CORES[idx % MIX_CORES.length],
     borderWidth:1, fill:true, tension:.2, spanGaps:false,
@@ -327,7 +721,7 @@ function refreshMix(){
   // le so as duas pontas da serie, para contextualizar sem afirmar tendencia
   const nota = [];
   const ini = tot.findIndex(v=>v>0);
-  const fim = nm-1-[...tot].reverse().findIndex(v=>v>0);
+  const fim = NM-1-[...tot].reverse().findIndex(v=>v>0);
   if (ini>=0 && fim>ini){
     for (const k of ativos){
       nota.push(`${cats[k]}: ${nf1.format(m[k][ini]/tot[ini]*100)}% → ${nf1.format(m[k][fim]/tot[fim]*100)}%`);
@@ -348,72 +742,298 @@ function shortName(name){
   return name.length>28 ? name.slice(0,26)+'…' : name;
 }
 
-function refresh(){
-  const {byMonth, byMonthAll, byCompPie, total, nComp, fc} = aggregate();
+// Rotulo curto para dentro da fatia. `split(' ')[0]` transformava "DISTRIBUIDORA
+// DE COMBUSTIVEL TORRAO" em "DISTRIBUIDORA" -- uma etiqueta que serve para
+// metade das razoes sociais do setor. Aqui as palavras genericas sao puladas.
+const GENERICAS = new Set(['DISTRIBUIDORA','DISTRIBUIDORA DE','COMERCIO','COMERCIAL','CIA','COMPANHIA',
+  'EMPRESA','INDUSTRIA','PRODUTOS','PETROLEO','PETRÓLEO','DERIVADOS','COMBUSTIVEIS','COMBUSTÍVEIS','DE','DO','DA','E']);
+function apelido(nome){
+  const palavras = nome.toUpperCase().replace(/[^A-ZÀ-Ú0-9' ]/g,' ').split(/\s+/).filter(Boolean);
+  const boa = palavras.find(p => !GENERICAS.has(p) && p.length > 2);
+  return (boa || palavras[0] || nome).slice(0, 14);
+}
 
-  // cards
+// ===== ranking de companhias ================================================
+// A pizza responde "quem e grande"; ela nao responde "quem ganhou e quem perdeu
+// espaco", que e a pergunta seguinte. A tabela compara a janela selecionada com
+// a MESMA janela 12 meses antes, em volume e em participacao.
+function refreshRank(agg){
+  const nomes = nomesComp();
+  const {byCompPie, byCompPrev, ativos, dozeOk} = agg;
+  const totAgora = byCompPie.reduce((a,b)=>a+b,0);
+  const totAntes = byCompPrev.reduce((a,b)=>a+b,0);
+  const temAntes = dozeOk && totAntes > 0;
+  const linhas = Array.from(byCompPie).map((v,i)=>({i, v})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
+  const top = linhas.slice(0, 15);
+  const resto = linhas.slice(15);
+
+  const pct = (v,t) => t>0 ? v/t*100 : null;
+  const cel = (valor, sufixo, comSinal) => {
+    if (valor === null || !isFinite(valor)) return '<td style="color:var(--muted)">—</td>';
+    // Uma variacao de -0,04 p.p. arredonda para "-0", que numa coluna de
+    // deltas se le como perda. Abaixo da resolucao exibida, e zero.
+    const v = Math.abs(valor) < 0.05 ? 0 : valor;
+    const cls = comSinal && v !== 0 ? (v > 0 ? 'up' : 'down') : '';
+    const sinal = comSinal && v >= 0 ? '+' : '';
+    return `<td class="${cls}">${sinal}${nfp.format(v)}${sufixo}</td>`;
+  };
+
+  const linhaHtml = (nome, v, vAnt, classe) => {
+    const pAgora = pct(v, totAgora), pAntes = temAntes ? pct(vAnt, totAntes) : null;
+    return `<tr class="${classe||''}">`
+      + `<td title="${nome.replace(/"/g,'&quot;')}">${shortName(nome)}</td>`
+      + `<td>${nf.format(v)}</td>`
+      + cel(pAgora, '%', false)
+      + cel(pAntes, '%', false)
+      + cel(pAntes === null ? null : pAgora - pAntes, ' p.p.', true)
+      + cel(temAntes && vAnt > 0 ? (v/vAnt - 1)*100 : null, '%', true)
+      + '</tr>';
+  };
+
+  let html = top.map(x => linhaHtml(nomes[x.i], x.v, byCompPrev[x.i])).join('');
+  if (resto.length){
+    const v = resto.reduce((a,x)=>a+x.v,0);
+    const vAnt = resto.reduce((a,x)=>a+byCompPrev[x.i],0);
+    html += linhaHtml(`Outras (${resto.length})`, v, vAnt, 'outras');
+  }
+  el('tabelaRank').querySelector('tbody').innerHTML = html
+    || '<tr><td colspan="6" style="color:var(--muted)">Sem dados no recorte selecionado.</td></tr>';
+
+  const janela = [];
+  for (let i=0;i<NM;i++) if (ativos[i]) janela.push(i);
+  el('rankNote').innerHTML = janela.length
+    ? `Janela: <b>${D.months[janela[0]]} a ${D.months[janela[janela.length-1]]}</b>`
+      + (temAntes ? ' · comparada com a mesma janela 12 meses antes'
+                  : ' · sem base comparável 12 meses antes (escolha um período que comece a partir de '
+                    + D.months[12] + ') — as colunas de comparação ficam vazias')
+      + ` · ${linhas.length} companhias com venda · não respeita o filtro de companhia`
+    : 'Sem meses consolidados no recorte selecionado.';
+}
+
+// ===== estrutura de mercado =================================================
+function refreshEstrutura(agg){
+  const {compMes, byCompPie, etanol, gasolina, ativos} = agg;
+  const nComps = nomesComp().length;
+
+  // HHI mes a mes, sobre os meses do recorte. Fora do recorte fica nulo (a serie
+  // some) em vez de zero, que seria lido como "mercado pulverizado".
+  const hhi = new Array(NM).fill(null);
+  for (let m=0;m<NM;m++){
+    if (!ativos[m]) continue;
+    let tot = 0;
+    for (let c=0;c<nComps;c++) tot += compMes[c*NM+m];
+    if (tot <= 0) continue;
+    let s = 0;
+    for (let c=0;c<nComps;c++){ const p = compMes[c*NM+m]/tot*100; s += p*p; }
+    hhi[m] = s;
+  }
+  hhiChart.data.datasets[0].data = hhi;
+  hhiChart.update();
+
+  const otto = new Array(NM).fill(null);
+  for (let m=0;m<NM;m++){
+    if (!ativos[m]) continue;
+    const den = etanol[m] + gasolina[m];
+    if (den > 0) otto[m] = etanol[m]/den*100;
+  }
+  ottoChart.data.datasets[0].data = otto;
+  ottoChart.update();
+
+  const ult = [...hhi].map((v,i)=>[v,i]).filter(x=>x[0]!==null).pop();
+  const ultOtto = [...otto].map((v,i)=>[v,i]).filter(x=>x[0]!==null).pop();
+  const totPie = byCompPie.reduce((a,b)=>a+b,0);
+  const ordenado = Array.from(byCompPie).sort((a,b)=>b-a);
+  const cr4 = totPie>0 ? ordenado.slice(0,4).reduce((a,b)=>a+b,0)/totPie*100 : null;
+  const partes = [];
+  if (ult) partes.push(`HHI em ${D.months[ult[1]]}: <b>${nf.format(ult[0])}</b>`);
+  if (cr4 !== null) partes.push(`CR4 no recorte: <b>${nf1.format(cr4)}%</b>`);
+  if (ultOtto) partes.push(`etanol no ciclo Otto em ${D.months[ultOtto[1]]}: <b>${nf1.format(ultOtto[0])}%</b>`);
+  partes.push(porGrupo() ? 'unidade: <b>grupo econômico</b>' : 'unidade: <b>agente regulado (CNPJ)</b>');
+  el('estruturaNote').innerHTML = partes.join(' · ');
+}
+
+// ===== cobertura da base ====================================================
+function refreshCobertura(agg){
+  const {cobertura} = agg;
+  cobChart.data.datasets[0].data = Array.from(cobertura, (v,i)=> EH_PARCIAL[i] ? null : v);
+  cobChart.data.datasets[1].data = Array.from(cobertura, (v,i)=> EH_PARCIAL[i] ? v : null);
+  cobChart.update();
+
+  // A mediana dos 12 meses fechados mais recentes e a referencia: se um mes
+  // fechado cair muito abaixo dela, e mes da ANP publicado pela metade -- o
+  // painel diz isso em vez de deixar o analista concluir que houve consolidacao
+  // do setor.
+  const fechados = [];
+  for (let i=0;i<NM;i++) if (!EH_PARCIAL[i] && cobertura[i] > 0) fechados.push(i);
+  if (!fechados.length){ el('coberturaNote').textContent = 'Sem dados.'; return; }
+  const ult = fechados[fechados.length-1];
+  const base = fechados.slice(-13, -1).map(i=>cobertura[i]).sort((a,b)=>a-b);
+  const mediana = base.length
+    ? (base.length % 2 ? base[(base.length-1)/2] : (base[base.length/2-1]+base[base.length/2])/2)
+    : cobertura[ult];
+  const suspeitos = fechados.filter(i => mediana > 0 && cobertura[i] < 0.75*mediana);
+  const partes = [
+    `Último mês fechado (${D.months[ult]}): <b>${nf.format(cobertura[ult])}</b> agentes`,
+    `mediana dos 12 anteriores: <b>${nf.format(mediana)}</b>`,
+  ];
+  if (suspeitos.length){
+    const lista = suspeitos.slice(-6).map(i=>`${D.months[i]} (${cobertura[i]})`).join(', ');
+    partes.push(`<span style="color:var(--gold)">meses fechados com cobertura atípica: ${lista}</span>`);
+  }
+  el('coberturaNote').innerHTML = partes.join(' · ');
+}
+
+// ===== exportação ===========================================================
+// Analista tira o numero do painel e leva para a planilha. Sem isto, a saida do
+// dashboard era o print de tela.
+function exportarCsv(){
+  const fc = +el('fComp').value, fu = +el('fUf').value, fk = +el('fMkt').value, fp = fProd();
+  const ativos = mesesAtivos();
+  const nomes = nomesComp();
+  const acc = new Map();                       // "mes|comp" -> volume
+  for (let i=0;i<NR;i+=P){
+    const m = R[i+I_MES];
+    if (!ativos[m]) continue;
+    if (fu!==-1 && R[i+I_UF]!==fu) continue;
+    if (fk!==-1 && R[i+I_MKT]!==fk) continue;
+    if (fp!==-1 && TEM_PROD && R[i+I_PROD]!==fp) continue;
+    const c = idComp(R[i+I_COMP]);
+    if (fc!==-1 && c!==fc) continue;
+    const chave = m + '|' + c;
+    acc.set(chave, (acc.get(chave) || 0) + R[i+I_QTD]/10000);
+  }
+  const filtros = [
+    fc===-1 ? 'todas as companhias' : nomes[fc],
+    fu===-1 ? 'todos os estados' : 'UF ' + D.ufs[fu],
+    fk===-1 ? 'todos os tipos' : D.mkts[fk],
+    fp===-1 ? 'todos os combustiveis' : D.prods[fp],
+  ].join(' | ');
+  // Separador ';' e decimal ',': e assim que o Excel em pt-BR abre sem perguntar.
+  const linhas = [
+    `# Vendas de combustiveis liquidos - ANP | recorte: ${filtros}`,
+    `# unidade: ${porGrupo() ? 'grupo economico' : 'agente regulado (CNPJ)'} | volumes em mil m3`
+      + ` | meses nao consolidados excluidos${N_PARCIAIS ? ' (' + D.months.filter((_,i)=>EH_PARCIAL[i]).join(', ') + ')' : ''}`,
+    `# gerado do data.js coletado em ${D.updated || 's/d'}`,
+    'mes;companhia;volume_mil_m3',
+  ];
+  const ordenadas = [...acc.entries()].sort((a,b)=>{
+    const [ma,ca] = a[0].split('|').map(Number), [mb,cb] = b[0].split('|').map(Number);
+    return ma-mb || nomes[ca].localeCompare(nomes[cb], 'pt-BR');
+  });
+  for (const [chave, v] of ordenadas){
+    const [m,c] = chave.split('|').map(Number);
+    linhas.push(`${D.months[m]};"${nomes[c].replace(/"/g,'""')}";${v.toFixed(4).replace('.', ',')}`);
+  }
+  // BOM para o Excel reconhecer UTF-8 e nao comer os acentos. Escrito como
+  // escape: um BOM literal no fonte e um caractere invisivel que qualquer
+  // reformatacao ou copia-e-cola come sem deixar rastro.
+  const blob = new Blob(['﻿' + linhas.join('\n')], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const primeiro = ativos.findIndex(v => v === 1), ultimo = ativos.lastIndexOf(1);
+  a.download = primeiro >= 0
+    ? `vendas-anp_${D.months[primeiro]}_a_${D.months[ultimo]}.csv` : 'vendas-anp_recorte.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+
+// ===== atualização geral ====================================================
+function refresh(){
+  const agg = aggregate();
+  const {byMonth, byMonthParcial, byMonthAll, byCompPie, total, nComp, fc, ativos} = agg;
+  const nomes = nomesComp();
+
+  // cards — meses parciais nao contam como mes ativo, senao diluem a media.
   el('cTot').textContent = nf.format(total);
-  const activeMonths = byMonth.reduce((a,v)=>a+(v>0?1:0),0) || 1;
-  el('cAvg').textContent = nf.format(total/activeMonths);
-  let bi = 0; for (let i=1;i<byMonth.length;i++) if (byMonth[i]>byMonth[bi]) bi=i;
-  el('cBest').textContent = total>0 ? D.months[bi] : '—';
-  el('cBestSub').textContent = total>0 ? nf.format(byMonth[bi])+' mil m³' : '';
+  let mesesComVenda = 0;
+  for (let i=0;i<NM;i++) if (ativos[i] && byMonth[i] > 0) mesesComVenda++;
+  el('cAvg').textContent = nf.format(total / (mesesComVenda || 1));
+  let bi = -1;
+  for (let i=0;i<NM;i++) if (ativos[i] && (bi === -1 || byMonth[i] > byMonth[bi])) bi = i;
+  el('cBest').textContent = total>0 && bi>=0 ? D.months[bi] : '—';
+  el('cBestSub').textContent = total>0 && bi>=0 ? nf.format(byMonth[bi])+' mil m³' : '';
   if (fc!==-1){
     const pieTot = byCompPie.reduce((a,b)=>a+b,0);
     el('cComp').textContent = pieTot>0 ? (byCompPie[fc]/pieTot*100).toFixed(1)+'%' : '—';
-    el('cCompSub').textContent = 'participação da companhia no recorte';
-    document.querySelector('.card:last-child .label').textContent = 'Participação';
+    el('cCompSub').textContent = 'participação no recorte';
+    el('cCompLabel').textContent = 'Participação';
   } else {
     el('cComp').textContent = nf.format(nComp);
     el('cCompSub').textContent = 'com vendas no recorte';
-    document.querySelector('.card:last-child .label').textContent = 'Companhias ativas';
+    el('cCompLabel').textContent = porGrupo() ? 'Grupos ativos' : 'Companhias ativas';
   }
 
-  // gráfico mensal
-  monthChart.data.datasets[0].data = Array.from(byMonth);
+  // gráfico mensal: barras do recorte + barra âmbar do mês em formação + MM12
+  monthChart.data.datasets[0].data = Array.from(byMonth, (v,i)=> ativos[i] ? v : null);
+  monthChart.data.datasets[1].data = N_PARCIAIS
+    ? Array.from(byMonthParcial, (v,i)=> EH_PARCIAL[i] && v>0 ? v : null) : [];
+  // Media movel de 12 meses sobre byMonthAll (fora do recorte tambem), porque a
+  // janela dos 12 meses e, por definicao, mais larga que o mes desenhado.
+  // Qualquer mes parcial ou faltante dentro da janela anula o ponto: media movel
+  // com um buraco dentro nao e media movel, e um numero menor com cara de queda.
+  const mm = new Array(NM).fill(null);
+  for (let i=11;i<NM;i++){
+    if (!ativos[i]) continue;
+    let s = 0, ok = true;
+    for (let j=i-11;j<=i;j++){ if (EH_PARCIAL[j]) { ok = false; break; } s += byMonthAll[j]; }
+    if (ok) mm[i] = s/12;
+  }
+  monthChart.data.datasets[2].data = mm;
+
   const parts = [];
-  if (fc!==-1) parts.push(D.comps[fc]);
+  if (fc!==-1) parts.push(nomes[fc]);
   if (+el('fUf').value!==-1) parts.push('UF ' + D.ufs[+el('fUf').value]);
   if (+el('fMkt').value!==-1) parts.push(D.mkts[+el('fMkt').value]);
   if (fProd()!==-1) parts.push(D.prods[fProd()]);
   const [fa, fb] = faixa();
   const mcSel = +el('fMes').value;
   const inverteu = (+el('fIni').value) > (+el('fFim').value);
-  const ativos = mesesAtivos();
   const nAtivos = ativos.reduce((x,y)=>x+y,0);
   const rec = [`${D.months[fa]} a ${D.months[fb]}`];
   if (mcSel !== -1) rec.push('somente ' + MESES_PT[mcSel-1]);
+  // Se o intervalo escolhido engloba um mes nao consolidado, o rotulo diz que
+  // ele esta ali mas fora da conta -- senao o leitor soma de cabeca um mes que
+  // o painel nao somou.
+  const parciaisNoRecorte = [];
+  for (let i=fa;i<=fb;i++) if (EH_PARCIAL[i]) parciaisNoRecorte.push(D.months[i]);
+  if (parciaisNoRecorte.length) rec.push(parciaisNoRecorte.join(', ') + ' fora das contas (não consolidado)');
   el('chartNote').textContent = 'Período: ' + rec.join(' · ') +
     (parts.length ? ' · Filtro: ' + parts.join(' · ') : ' · todas as companhias, estados e tipos de consumidor');
 
   let aviso = '';
-  if (nAtivos === 0) aviso = 'O recorte selecionado não contém nenhum mês.';
+  if (nAtivos === 0) aviso = 'O recorte selecionado não contém nenhum mês consolidado.';
   else if (total === 0) aviso = 'Nenhuma venda registrada no recorte selecionado.';
   else if (inverteu) aviso = 'Período inicial posterior ao final — as duas pontas foram invertidas.';
   el('faixaVazia').textContent = aviso;
   el('faixaVazia').style.display = aviso ? 'block' : 'none';
-  // sem filtros, todos os meses ficam acima de 7.000 mil m³: eixo parte de 7.000
-  // para dar zoom na variação; com filtros, volta ao automático.
-  monthChart.options.scales.y.min = parts.length ? undefined : 7000;
   monthChart.update();
+
+  // variação a/a
+  yoyChart.data.datasets[0].data = Array.from({length:NM}, (_,i)=>
+    (ativos[i] && i>=12 && !EH_PARCIAL[i-12] && byMonthAll[i-12] > 0)
+      ? (byMonthAll[i]/byMonthAll[i-12] - 1)*100 : null);
+  yoyChart.update();
 
   // quadro: janela selecionada x mesma janela 12 meses antes.
   // Na visao padrao (intervalo cheio, sem mes escolhido) o quadro perderia a
   // graca -- comparar a base inteira consigo mesma nao diz nada --, entao ali
   // ele volta ao comportamento antigo: ano corrente contra o ano anterior.
-  const anoAtual = +D.months[D.months.length-1].slice(0,4);
-  const semRecorte = (fa === 0 && fb === D.months.length-1 && mcSel === -1);
+  const anoAtual = IDX_ULTIMO_COMPLETO >= 0
+    ? +D.months[IDX_ULTIMO_COMPLETO].slice(0,4) : +D.months[NM-1].slice(0,4);
+  const semRecorte = (fa === 0 && fb === NM-1 && mcSel === -1);
   const sel = [];
-  for (let i=0;i<D.months.length;i++){
+  for (let i=0;i<NM;i++){
+    if (EH_PARCIAL[i]) continue;
     if (semRecorte ? (+D.months[i].slice(0,4) === anoAtual) : ativos[i]) sel.push(i);
   }
   // A janela anterior le byMonthAll: por definicao ela cai fora do recorte.
-  // Se qualquer mes dela faltar na base, mostra N/D em vez de somar parcial.
+  // Se qualquer mes dela faltar na base -- ou for parcial --, mostra N/D em vez
+  // de somar parcial.
   let acumAtual = 0, acumAnt = 0, baseCompleta = sel.length > 0;
   for (const i of sel){
     acumAtual += byMonthAll[i];
     const j = i - 12;
-    if (j < 0) { baseCompleta = false; continue; }
+    if (j < 0 || EH_PARCIAL[j]) { baseCompleta = false; continue; }
     acumAnt += byMonthAll[j];
   }
   const varAc = (baseCompleta && acumAnt > 0) ? (acumAtual/acumAnt - 1) * 100 : null;
@@ -429,23 +1049,28 @@ function refresh(){
   const top = idx.slice(0,12);
   const rest = idx.slice(12).reduce((a,x)=>a+x[0],0);
   const nFatias = top.length + (rest>0 ? 1 : 0);
-  pieChart.data.labels = top.map(x=>shortName(D.comps[x[1]])).concat(rest>0?['Outras ('+(idx.length-top.length)+')']:[]);
+  pieChart.data.labels = top.map(x=>shortName(nomes[x[1]])).concat(rest>0?['Outras ('+(idx.length-top.length)+')']:[]);
   pieChart.data.datasets[0].data = top.map(x=>x[0]).concat(rest>0?[rest]:[]);
   pieChart.data.datasets[0].backgroundColor = Array.from({length:nFatias}, (_,i)=>
     i < TOP_DESTAQUE ? PIE_TOP[i] : (rest>0 && i===nFatias-1 ? PIE_OUTRAS : PIE_REST[(i-TOP_DESTAQUE)%PIE_REST.length]));
   pieChart.data.datasets[0].offset = Array.from({length:nFatias}, (_,i)=> i < TOP_DESTAQUE ? 22 : 0);
   pieChart.update();
 
+  refreshRank(agg);
+  refreshEstrutura(agg);
+  refreshCobertura(agg);
   refreshMix();
 }
 
-el('fComp').addEventListener('change', refresh);
-el('fUf').addEventListener('change', refresh);
-el('fMkt').addEventListener('change', refresh);
+for (const id of ['fUf','fMkt','fIni','fFim','fMes']) el(id).addEventListener('change', refresh);
+el('fComp').addEventListener('change', () => {
+  const v = +el('fComp').value;
+  compSelecionada = v === -1 ? null : nomesComp()[v];
+  refresh();
+});
 if (TEM_PROD) el('fProd').addEventListener('change', refresh);
-el('fIni').addEventListener('change', refresh);
-el('fFim').addEventListener('change', refresh);
-el('fMes').addEventListener('change', refresh);
+if (temGrupo) el('fGrupo').addEventListener('change', () => { preencherCompanhias(); refresh(); });
+el('btnCsv').addEventListener('click', exportarCsv);
 el('mixTabs').addEventListener('click', ev => {
   const b = ev.target.closest('button[data-mix]');
   if (!b || b.dataset.mix === mixModo) return;
@@ -454,6 +1079,7 @@ el('mixTabs').addEventListener('click', ev => {
   refreshMix();
 });
 refresh();
+}
 </script>
 </body>
 </html>
