@@ -13,6 +13,7 @@ from pathlib import Path
 
 import data_js
 import leitura
+import membros as mod_membros
 import requests
 
 URL_ZIP = ("https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/"
@@ -38,11 +39,21 @@ def _get(url):
 
 
 def _extrair_do_zip(blob):
+    """Todos os membros da familia de vendas, em ordem de nome.
+
+    Ate out/2026 bastava o _Atual: ele trazia a serie inteira. A ANP
+    encurtou essa janela para 33 meses e moveu o resto para membros
+    historicos do MESMO zip (ver scripts/membros.py e o run #19).
+    Ignora-los significaria publicar 33 meses no lugar de 225.
+    """
     zf = zipfile.ZipFile(io.BytesIO(blob))
-    for nome in zf.namelist():
-        if nome.lower().endswith(ALVO_CSV.lower()):
-            return zf.read(nome)
-    raise RuntimeError(f"{ALVO_CSV} não encontrado no zip ({zf.namelist()[:10]})")
+    achados = [n for n in sorted(zf.namelist())
+               if mod_membros.e_membro_de_vendas(n)]
+    if not achados:
+        raise RuntimeError(
+            f"nenhum membro Liquidos_Vendas_* no zip ({zf.namelist()[:10]})")
+    print(f"[update] membros de vendas no zip: {achados}")
+    return [(n, zf.read(n)) for n in achados]
 
 
 def baixar():
@@ -56,13 +67,16 @@ def baixar():
             time.sleep(espera)
         try:
             blob = _get(URL_ZIP)
-            if blob[:2] == b"PK":          # é zip: extrai o CSV
+            if blob[:2] == b"PK":          # é zip: extrai os membros
                 return _extrair_do_zip(blob)
-            return blob                    # servidor devolveu o CSV direto
+            # Servidor devolveu o CSV direto: so o _Atual, que hoje cobre
+            # 33 meses. Nao da para sustentar a serie com ele sozinho; quem
+            # barra e o teto de meses herdados, com mensagem explicita.
+            return [(ALVO_CSV, blob)]
         except Exception as exc:
             ultima_falha = f"zip: {str(exc)[:120]}"
         try:
-            return _get(URL_CSV)
+            return [(ALVO_CSV, _get(URL_CSV))]
         except Exception as exc:
             ultima_falha = f"{ultima_falha} | csv: {str(exc)[:120]}"
     raise RuntimeError(f"ANP indisponível após {TENTATIVAS} tentativas ({ultima_falha})")
@@ -160,7 +174,6 @@ def agregar(conteudo: bytes, stats: dict | None = None):
     errados e nenhum sinal de erro — o pior desfecho possível para um dashboard
     que roda sozinho todo mês.
     """
-    agg = defaultdict(float)
     # Encoding DETECTADO, nao assumido. O run #17 (2026-10-28) caiu com
     # "MÃªs" porque a ANP passou a gravar o CSV em UTF-8 e aqui havia
     # encoding="latin-1" fixo. Ver scripts/leitura.py.
@@ -168,9 +181,25 @@ def agregar(conteudo: bytes, stats: dict | None = None):
     print(f"[update] encoding detectado: {enc}")
     r = csv.reader(io.StringIO(conteudo_txt), delimiter=";")
 
-    cabecalho = next(r, None)
-    if cabecalho is None:
+    primeira = next(r, None)
+    if primeira is None:
         raise RuntimeError("CSV da ANP veio vazio")
+
+    # O membro historico 2007-2016 nao tem cabecalho e tem 11 colunas, com
+    # UF/mercado/quantidade deslocados um a esquerda. Le-lo com as
+    # constantes do layout novo daria numero errado sem erro nenhum.
+    if not mod_membros.parece_cabecalho(primeira):
+        if len(primeira) != mod_membros.N_COLUNAS_11:
+            raise RuntimeError(
+                f"membro sem cabecalho com {len(primeira)} colunas, esperado "
+                f"{mod_membros.N_COLUNAS_11}. Layout desconhecido; data.js NAO "
+                "foi alterado.")
+        L = mod_membros.LAYOUT_11
+        return _somar(_com_primeira(primeira, r), L["ano"], L["mes"], L["comp"],
+                      L["uf"], L["mkt"], L["prod"], L["qtd"],
+                      mod_membros.N_COLUNAS_11, enc, stats)
+
+    cabecalho = primeira
     if len(cabecalho) < N_COLUNAS_MIN:
         raise RuntimeError(
             f"CSV da ANP tem {len(cabecalho)} colunas, esperado >= {N_COLUNAS_MIN}. "
@@ -178,7 +207,23 @@ def agregar(conteudo: bytes, stats: dict | None = None):
         )
     leitura.conferir_sem_mojibake(cabecalho, enc, "cabecalho")
     conferir_cabecalho(cabecalho)
+    return _somar(r, COL_ANO, COL_MES, COL_COMP, COL_UF, COL_MKT, COL_PROD,
+                  COL_QTD, N_COLUNAS_MIN, enc, stats)
 
+
+def _com_primeira(primeira, resto):
+    yield primeira
+    yield from resto
+
+
+def _somar(linhas, c_ano, c_mes, c_comp, c_uf, c_mkt, c_prod, c_qtd,
+           n_min, enc, stats):
+    """Soma as linhas ja decodificadas, com os indices do layout do membro."""
+    agg = defaultdict(float)
+    COL_ANO, COL_MES, COL_COMP = c_ano, c_mes, c_comp
+    COL_UF, COL_MKT, COL_PROD, COL_QTD = c_uf, c_mkt, c_prod, c_qtd
+    N_COLUNAS_MIN = n_min
+    r = linhas
     total = descartadas = negativas = 0
     soma_negativa = 0.0
     motivos = defaultdict(int)
@@ -240,6 +285,43 @@ def agregar(conteudo: bytes, stats: dict | None = None):
         stats.update(linhas=total, descartadas=descartadas,
                      negativas=negativas, combinacoes=len(agg),
                      encoding=enc)
+    return agg
+
+
+def agregar_membros(membros, stats: dict | None = None):
+    """Agrega todos os membros de vendas do zip num unico cubo.
+
+    Cada membro e validado isoladamente (encoding, cabecalho ou layout de
+    11 colunas, mojibake, linhas invalidas) e depois conferido contra os
+    outros: nenhum pode ter buraco interno, e dois nao podem trazer o
+    mesmo mes -- somar o mesmo mes duas vezes o DOBRA, e nenhuma trava de
+    volume pegaria isso, porque o total so cresce.
+    """
+    agg = defaultdict(float)
+    cobertura, encodings = {}, {}
+    acum = {"linhas": 0, "descartadas": 0, "negativas": 0}
+    for nome, conteudo in membros:
+        print(f"[update] --- {nome} ({len(conteudo) / 1e6:.0f} MB)")
+        s: dict = {}
+        parcial = agregar(conteudo, s)
+        meses = sorted({k[0] for k in parcial})
+        mod_membros.conferir_contiguidade(nome, meses)
+        print(f"[update]     {meses[0]} a {meses[-1]} ({len(meses)} meses)")
+        cobertura[nome] = meses
+        encodings[nome] = s.get("encoding")
+        for c in acum:
+            acum[c] += s.get(c, 0)
+        for k, v in parcial.items():
+            agg[k] += v
+    mod_membros.conferir_sem_sobreposicao(cobertura)
+    if stats is not None:
+        stats.update(
+            **acum,
+            combinacoes=len(agg),
+            encoding=(next(iter(encodings.values()), None)
+                      if len(encodings) == 1 else encodings),
+            cobertura={n: [m[0], m[-1]] for n, m in cobertura.items()},
+        )
     return agg
 
 
@@ -406,13 +488,30 @@ def escrever_data_js(data):
     data_js.escrever(OUT, data)
 
 
-def resumir_fonte(conteudo: bytes, stats: dict) -> dict:
-    """Identidade do arquivo da ANP que produziu esta rodada."""
+def resumir_fonte(membros, stats: dict, herdados=None) -> dict:
+    """Identidade dos arquivos da ANP que produziram esta rodada.
+
+    Com varios membros, `sha256` passa a ser o hash dos hashes: continua
+    sendo uma chave unica da rodada, e `membros` guarda o detalhe de cada
+    arquivo. Quando ha um membro so, `sha256` e `bytes` seguem sendo os
+    dele -- a proveniencia das rodadas antigas continua comparavel.
+    """
+    if isinstance(membros, (bytes, bytearray)):      # compat: um arquivo so
+        membros = [(ALVO_CSV, bytes(membros))]
+    # 16 hex bastam para identificar a versao do arquivo; o hash inteiro so
+    # engordaria o data.js, que ja tem 7 MB.
+    detalhe = [{"nome": n, "sha256": hashlib.sha256(b).hexdigest()[:16],
+                "bytes": len(b)} for n, b in membros]
+    junto = "|".join(d["sha256"] for d in detalhe).encode()
     return {
-        # 16 hex bastam para identificar a versao do arquivo; o hash inteiro so
-        # engordaria o data.js, que ja tem 7 MB.
-        "sha256": hashlib.sha256(conteudo).hexdigest()[:16],
-        "bytes": len(conteudo),
+        "sha256": (detalhe[0]["sha256"] if len(detalhe) == 1
+                   else hashlib.sha256(junto).hexdigest()[:16]),
+        "bytes": sum(d["bytes"] for d in detalhe),
+        "membros": detalhe,
+        # Meses que vieram do artefato anterior porque a fonte nao os traz
+        # mais. Sem isto, um numero herdado seria indistinguivel de um
+        # numero revalidado nesta rodada.
+        "herdados": list(herdados or []),
         "baixado_em": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         **stats,
     }
@@ -420,13 +519,24 @@ def resumir_fonte(conteudo: bytes, stats: dict) -> dict:
 
 def main():
     anterior = carregar_anterior()
-    conteudo = baixar()
-    print(f"[update] download ok ({len(conteudo)/1e6:.0f} MB)")
+    membros = baixar()
+    if isinstance(membros, (bytes, bytearray)):   # compat com rodada de 1 arquivo
+        membros = [(ALVO_CSV, bytes(membros))]
+    total_bytes = sum(len(b) for _, b in membros)
+    print(f"[update] download ok ({total_bytes / 1e6:.0f} MB em "
+          f"{len(membros)} membro(s))")
     stats: dict = {}
-    agg = agregar(conteudo, stats)
-    fonte = resumir_fonte(conteudo, stats)
+    agg = agregar_membros(membros, stats)
+    # Lacuna interior da fonte (hoje: 2017, ausente de todos os membros de
+    # vendas do zip). Estreita de proposito — ver scripts/membros.py.
+    herdados = mod_membros.herdar_lacunas(agg, anterior)
+    if herdados:
+        print(f"[update] {len(herdados)} mes(es) HERDADOS do artefato anterior "
+              f"(a fonte nao os traz): {', '.join(herdados)}")
+    fonte = resumir_fonte(membros, stats, herdados)
     print(f"[update] fonte sha256:{fonte['sha256']} ({fonte['bytes']:,} bytes)")
     data = gerar_data_js(agg, fonte)
+    data["herdados"] = herdados
     conferir_contra_anterior(data, anterior)   # levanta antes de escrever
     escrever_data_js(data)
 
