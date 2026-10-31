@@ -213,6 +213,20 @@ def _buracos(meses: set) -> set:
     return esperados - meses
 
 
+def familia(nome: str) -> str:
+    """Familia do membro, a partir do nome: Liquidos_<Familia>_...
+
+    O zip traz bases DIFERENTES -- Vendas, Entregas (distribuidor, fornecedor,
+    historico) e Importacao --, com outro grao e outras colunas. A primeira
+    versao deste relatorio somou a cobertura de todas e concluiu que nao faltava
+    nenhum mes; faltava 2017 na familia que importa. Cobertura so faz sentido
+    DENTRO de uma familia.
+    """
+    base = nome.rsplit("/", 1)[-1]
+    partes = base.split("_")
+    return partes[1].lower() if len(partes) > 1 else base.lower()
+
+
 def meses_do_data_js() -> list:
     caminho = BASE / "data.js"
     if not caminho.exists():
@@ -239,10 +253,12 @@ def main() -> int:
 
     linhas_md = ["# Diagnostico do liquidos.zip da ANP", "",
                  f"- zip: {len(blob):,} bytes", f"- membros: {len(zf.infolist())}", ""]
-    cobertura = set()
+    cobertura = {}
     for info in infos:
         d = inspecionar_membro(zf, info)
-        cobertura.update(d.pop("_meses", []))
+        fam = familia(d["nome"])
+        cobertura.setdefault(fam, set()).update(d.pop("_meses", []))
+        d["familia"] = fam
         print(f"--- {d['nome']}", flush=True)
         for k, v in d.items():
             if k != "nome":
@@ -253,21 +269,34 @@ def main() -> int:
         linhas_md += [""]
 
     atuais = set(meses_do_data_js())
-    faltando = sorted(atuais - cobertura)
-    resumo = [
-        "## Cobertura conjunta dos membros",
+    vendas = cobertura.get("vendas", set())
+    faltando = sorted(atuais - vendas)
+    resumo = ["## Cobertura POR FAMILIA", "",
+              "Vendas, Entregas e Importacao sao bases diferentes, com outro grao e",
+              "outras colunas. Somar a cobertura das tres esconde buraco na que",
+              "importa — foi o que a primeira versao deste relatorio fez.", ""]
+    for fam in sorted(cobertura):
+        meses = cobertura[fam]
+        if not meses:
+            continue
+        resumo.append(
+            f"- **{fam}**: {len(meses)} meses ({min(meses)} a {max(meses)}), "
+            f"buracos: `{sorted(_buracos(meses))[:14]}`")
+    resumo += [
         "",
-        f"- meses distintos no zip inteiro: **{len(cobertura)}**"
-        + (f" ({min(cobertura)} a {max(cobertura)})" if cobertura else ""),
+        "## A serie do dashboard (familia `vendas`)",
+        "",
+        f"- meses cobertos pelos membros de vendas: **{len(vendas)}**"
+        + (f" ({min(vendas)} a {max(vendas)})" if vendas else ""),
         f"- meses no data.js atual: **{len(atuais)}**",
-        f"- buracos na cobertura do zip: `{sorted(_buracos(cobertura))[:12]}`",
-        f"- meses do data.js que o zip NAO cobre: **{len(faltando)}**"
-        + (f" (ex.: {faltando[:6]})" if faltando else " — o zip cobre toda a serie"),
+        f"- meses do data.js que a familia `vendas` NAO cobre: **{len(faltando)}**"
+        + (f" ({faltando[:14]})" if faltando else " — a fonte cobre toda a serie"),
         "",
         "**Leitura:** se a ultima linha for 0, da para derivar o historico inteiro",
-        "da fonte a cada rodada (basta ler todos os membros em vez de so o",
-        "`_Atual`). Se for > 0, a serie so se mantem costurando com o artefato",
-        "anterior, e isso precisa ficar explicito na proveniencia do data.js.",
+        "da fonte a cada rodada, lendo todos os membros de vendas em vez de so o",
+        "`_Atual`. Se for > 0, esses meses existem no artefato e em nenhum membro",
+        "da fonte: ou vem herdados do data.js anterior, marcados na proveniencia,",
+        "ou somem da serie.",
         "",
     ]
     print("\n".join(resumo), flush=True)
