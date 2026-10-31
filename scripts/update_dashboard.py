@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import data_js
+import leitura
 import requests
 
 URL_ZIP = ("https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/"
@@ -160,8 +161,12 @@ def agregar(conteudo: bytes, stats: dict | None = None):
     que roda sozinho todo mês.
     """
     agg = defaultdict(float)
-    texto = io.TextIOWrapper(io.BytesIO(conteudo), encoding="latin-1")
-    r = csv.reader(texto, delimiter=";")
+    # Encoding DETECTADO, nao assumido. O run #17 (2026-10-28) caiu com
+    # "MÃªs" porque a ANP passou a gravar o CSV em UTF-8 e aqui havia
+    # encoding="latin-1" fixo. Ver scripts/leitura.py.
+    conteudo_txt, enc = leitura.decodificar(conteudo)
+    print(f"[update] encoding detectado: {enc}")
+    r = csv.reader(io.StringIO(conteudo_txt), delimiter=";")
 
     cabecalho = next(r, None)
     if cabecalho is None:
@@ -171,6 +176,7 @@ def agregar(conteudo: bytes, stats: dict | None = None):
             f"CSV da ANP tem {len(cabecalho)} colunas, esperado >= {N_COLUNAS_MIN}. "
             f"Layout mudou? Cabeçalho: {cabecalho}"
         )
+    leitura.conferir_sem_mojibake(cabecalho, enc, "cabecalho")
     conferir_cabecalho(cabecalho)
 
     total = descartadas = negativas = 0
@@ -222,9 +228,18 @@ def agregar(conteudo: bytes, stats: dict | None = None):
         print(f"[update] {negativas} linhas com quantidade negativa "
               f"(estornos, {soma_negativa:,.1f} mil m³) — mantidas na soma")
     print(f"[update] {total} linhas lidas, {len(agg)} combinacoes")
+    # Rotulos das dimensoes. O cabecalho pode estar limpo e os nomes de
+    # agente corrompidos: nenhuma trava de VOLUME pega isso, porque o
+    # volume nao muda quando so o rotulo corrompe -- e "RaÃ­zen" ao lado
+    # de "Raízen" conta o mesmo agente duas vezes e derruba o HHI.
+    leitura.conferir_sem_mojibake(
+        {c for _, c, _, _, _ in agg} | {u for _, _, u, _, _ in agg}
+        | {k for _, _, _, k, _ in agg} | {p for _, _, _, _, p in agg},
+        enc, "dimensoes (agente/UF/mercado/produto)")
     if stats is not None:
         stats.update(linhas=total, descartadas=descartadas,
-                     negativas=negativas, combinacoes=len(agg))
+                     negativas=negativas, combinacoes=len(agg),
+                     encoding=enc)
     return agg
 
 
