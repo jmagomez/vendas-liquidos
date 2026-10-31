@@ -27,11 +27,59 @@ estrita e deterministica e testavel, ao contrario de heuristica estatistica
 # por ultimo como rede: nunca falha, decodifica qualquer byte.
 CANDIDATOS = ("utf-8-sig", "cp1252", "latin-1")
 
-# Marcas de UTF-8 lido como byte unico. "Ã" e "Â" sao o primeiro byte de
-# praticamente todo caractere acentuado do portugues em UTF-8 (C3 xx / C2 xx) e
-# nao aparecem em texto portugues legitimo da ANP; "�" e o replacement
-# char, sinal de decodificacao com errors="replace" em algum ponto da cadeia.
-MARCAS_MOJIBAKE = ("Ã", "Â", "�")
+
+# --- Deteccao de mojibake ---------------------------------------------------
+# PRIMEIRA VERSAO DESTA TRAVA ESTAVA ERRADA e derrubou o run #18: ela acusava
+# qualquer "Ã" ou "Â", e esses caracteres sao letras legitimas do portugues em
+# CAIXA ALTA -- que e exatamente como a ANP grava os nomes de agente:
+# "AGILE ... DISTRIBUIÇÃO", "ATLÂNTICA PRODUTOS DE PETRÓLEO", "TORRÃO",
+# "TABOCÃO". Quatro nomes reais bastaram para parar a rotina.
+#
+# O critério correto nao e o caractere isolado, e o PAR. Em UTF-8, um caractere
+# acentuado e dois bytes: C3/C2 (ou C5/D0) seguidos de um byte de continuacao
+# na faixa 0x80-0xBF. Lido byte a byte, isso vira "Ã"/"Â" seguido do caractere
+# que aquela faixa representa -- "ª", "\xad", "‡", "ƒ"... Em portugues de
+# verdade, "Ã" e "Â" sao sempre seguidos de LETRA ("ÃO", "ÃE", "ÂN"), nunca de
+# um caractere dessa faixa. O par e a assinatura; a letra sozinha nao e.
+#
+# Validado contra os 370 rotulos reais do data.js (agentes, UFs, mercados,
+# produtos, meses): zero falso positivo. E contra mojibake gerado nas duas
+# interpretacoes possiveis (latin-1 e cp1252) de sete nomes acentuados:
+# todos pegos.
+_PREFIXOS = ("Ã", "Â", "Å", "Ð")  # C3, C2, C5, D0 como byte unico
+
+
+def _sufixos() -> frozenset:
+    """Caracteres que representam um byte de continuacao UTF-8 (0x80-0xBF).
+
+    Monta o conjunto nas duas interpretacoes possiveis: latin-1 (controles
+    invisiveis) e cp1252 (aspas curvas, travessao, etc.), porque o mojibake
+    pode ter nascido de qualquer uma das duas.
+    """
+    s = set()
+    for b in range(0x80, 0xC0):
+        s.add(bytes([b]).decode("latin-1"))
+        try:
+            s.add(bytes([b]).decode("cp1252"))
+        except UnicodeDecodeError:   # 0x81, 0x8D, 0x8F, 0x90, 0x9D nao existem em cp1252
+            pass
+    return frozenset(s)
+
+
+SUFIXOS_MOJIBAKE = _sufixos()
+
+# Replacement char: sinal de que alguem decodificou com errors="replace" em
+# algum ponto da cadeia. Perda irreversivel de informacao, sempre erro.
+MARCA_PERDA = "�"
+
+
+def suspeita_mojibake(valor: str) -> bool:
+    """True se o texto tiver assinatura de UTF-8 lido como byte unico."""
+    v = valor or ""
+    if MARCA_PERDA in v:
+        return True
+    return any(v[i] in _PREFIXOS and v[i + 1] in SUFIXOS_MOJIBAKE
+               for i in range(len(v) - 1))
 
 
 def decodificar(blob: bytes) -> tuple[str, str]:
@@ -52,10 +100,6 @@ def decodificar(blob: bytes) -> tuple[str, str]:
     # Inalcancavel: latin-1 decodifica qualquer sequencia de bytes. Fica como
     # guarda para o caso de alguem mexer em CANDIDATOS e remover a rede.
     raise RuntimeError("nao consegui decodificar o arquivo da ANP: " + " | ".join(erros))
-
-
-def suspeita_mojibake(valor: str) -> bool:
-    return any(marca in (valor or "") for marca in MARCAS_MOJIBAKE)
 
 
 def conferir_sem_mojibake(valores, enc: str, onde: str = "arquivo") -> None:
