@@ -1,0 +1,61 @@
+name: Diagnostico do zip da ANP (read-only)
+
+# Responde o que mudou na origem depois que o run #19 acusou
+# "33 meses no arquivo novo contra 116 no atual": quais membros existem hoje no
+# liquidos.zip, com que cabecalho, encoding, delimitador e faixa de meses, e se
+# juntos cobrem a serie do data.js sem buraco.
+#
+# NAO atualiza nada. Sem cron: so roda quando alguem pede.
+
+on:
+  workflow_dispatch: {}
+
+# Read-only de verdade, e nao por convencao: sem `contents: write` o token do
+# job NAO consegue commitar, nem que o script tentasse. A trava e a permissao,
+# nao a boa intencao de quem escreveu o YAML.
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnostico-zip
+  cancel-in-progress: true
+
+jobs:
+  inspecionar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Inspeciona o liquidos.zip
+        run: |
+          pip install -r requirements.txt
+          python scripts/inspecionar_zip.py --saida relatorio-zip-anp.md
+
+      # Prova, e nao promessa: se o script tiver tocado em qualquer arquivo
+      # versionado (data.js inclusive), o job falha aqui.
+      - name: Confirma que nada versionado mudou
+        run: |
+          if ! git diff --quiet; then
+            echo "::error::o diagnostico alterou arquivos versionados — isso nao deveria acontecer"
+            git --no-pager diff --stat
+            exit 1
+          fi
+          echo "::notice::nenhum arquivo versionado foi alterado"
+
+      - name: Publica o relatorio no resumo do run
+        if: always()
+        run: cat relatorio-zip-anp.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relatorio-zip-anp
+          path: relatorio-zip-anp.md
+          retention-days: 30
