@@ -13,6 +13,8 @@ import json
 import os
 from pathlib import Path
 
+import cubos
+
 # Numero e ordem dos campos por linha em data.js["rows"]. Fica gravado no
 # proprio arquivo (chave "campos") para que quem le nao precise assumir o passo.
 CAMPOS = ["mes", "comp", "uf", "mkt", "prod", "qtd"]
@@ -29,12 +31,26 @@ ESCALA = 10000
 
 
 def carregar(caminho: Path):
-    """Le um data.js. Devolve None se o arquivo nao existe ou nao e legivel."""
+    """Le o artefato anterior. None se nao houver nenhum legivel.
+
+    A partir de 2026-11 o artefato canonico e `data/` ao lado do caminho dado
+    (meta.json + cubo.bin.gz, ~2,1 MB); o data.js virou um carregador de 2 KB.
+    A leitura do data.js ANTIGO continua aqui como recuo porque a primeira
+    rodada depois da migracao ainda encontra o arquivo velho no repositorio --
+    e e dele que vem a lacuna de 2017, que seria perdida se `carregar`
+    devolvesse None.
+    """
     caminho = Path(caminho)
+    d = cubos.ler(caminho.parent)
+    if d is not None:
+        return d
     if not caminho.exists():
         return None
     try:
         bruto = caminho.read_text(encoding="utf-8").strip()
+        if not bruto.startswith(PREFIXO):
+            # Ja e o carregador, e data/ nao existe: nao ha artefato anterior.
+            return None
         return json.loads(bruto.removeprefix(PREFIXO).rstrip(";\n"))
     except Exception as exc:  # noqa: BLE001
         print(f"[data_js] aviso: nao consegui ler {caminho} ({exc})")
@@ -42,27 +58,25 @@ def carregar(caminho: Path):
 
 
 def escrever(caminho: Path, data: dict) -> None:
-    """Grava o data.js de forma atomica: arquivo temporario + os.replace.
+    """Grava os artefatos: data/ (canonico) e o data.js carregador.
 
-    A rotina roda sozinha num runner que pode ser interrompido (timeout, job
-    cancelado, disco cheio). Um write_text direto que morre pela metade deixa um
-    data.js truncado -- JSON invalido, dashboard em branco, e a proxima execucao
-    perde a base de comparacao contra a qual as travas de regressao existem.
-    os.replace e atomico no mesmo sistema de arquivos: ou fica o arquivo antigo
-    inteiro, ou o novo inteiro.
+    Antes isto escrevia um unico data.js com tudo dentro -- 13,9 MB de JSON que
+    o painel baixava num <script> SINCRONO antes de pintar um pixel, e que o
+    repositorio versionava inteiro a cada rodada. Agora:
+
+        data/meta.json      dimensoes, marcas e proveniencia   (~18 KB)
+        data/cubo.bin.gz    as linhas, colunar e comprimido    (~2,1 MB)
+        data/cubo-mes-*.json  cubos marginais, para o painel ter numero
+                              na tela antes do cubo completo chegar
+        data.js             ~2 KB que buscam o que esta acima
+
+    Cada arquivo e escrito de forma atomica (tmp + os.replace), pelo mesmo
+    motivo de sempre: um job interrompido no meio nao pode deixar artefato
+    truncado sendo servido como se fosse bom.
     """
     caminho = Path(caminho)
-    texto = PREFIXO + json.dumps(data, ensure_ascii=False, separators=(",", ":")) + ";\n"
-    tmp = caminho.with_name(caminho.name + ".tmp")
-    try:
-        with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(texto)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, caminho)
-    finally:
-        if tmp.exists():
-            tmp.unlink()
+    cubos.escrever(caminho.parent, data)
+    cubos.escrever_carregador(caminho)
 
 
 def campos_de(d: dict):

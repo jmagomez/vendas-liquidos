@@ -18,12 +18,23 @@
     "",
     "A rotina imprime, a cada rodada, os candidatos detectados (mesma raiz apos",
     "remover acento, pontuacao e sufixo societario). Candidato nao e alias: e so",
-    "um lugar para olhar.",
+    "um lugar para olhar. 'revisados' registra os que ja foram olhados e, por",
+    "enquanto, NAO fundidos -- com o motivo. O teste exige que todo candidato",
+    "detectado esteja em 'de' ou em 'revisados': candidato novo para a CI, para",
+    "que ninguem descubra por acaso, meses depois, que a serie de um agente",
+    "estava partida em duas.",
     "",
-    "Vazio de proposito: nos 217 agentes da serie 2017-2026 nao ha nenhuma",
-    "variante tipografica nem de sufixo societario. Preencher sem evidencia seria",
-    "mudar numero publicado por suposicao."
+    "Com a serie de 2007-2026 (318 agentes) apareceram quatro candidatos. Nenhum",
+    "foi fundido ainda, e fundir qualquer um deles NAO muda numero mensal nenhum:",
+    "as grafias tem janelas DISJUNTAS, nenhum mes tem as duas. O efeito e so na",
+    "continuidade da serie por agente e no filtro de companhia."
   ],
   "de": {},
-  "motivos": {}
+  "motivos": {},
+  "revisados": {
+    "SIMARELLI DISTRIBUIDORA DE DERIVADOS DE PETROLEO": "2007-01..2016-12 como '... PETRÓLEO LTDA.' (1.948 mil m3) e 2017-01..2026-09 como '... PETROLEO S.A.' (1.456 mil m3). A quebra cai EXATAMENTE na fronteira entre os dois arquivos da ANP (historico ate 2016-12, atual a partir de 2017-01), o que aponta para diferenca de grafia entre arquivos, nao troca de empresa. Forte candidato a fusao; aguardando confirmacao.",
+    "JOAPI DISTRIBUIDORA DE COMBUSTIVEIS": "2013-05..2016-12 como 'LTDA' (109 mil m3) e 2017-01..2026-09 como 'S.A.' (18 mil m3). Tambem quebra na fronteira dos arquivos, mas aqui muda o tipo societario (Ltda -> S.A.), que pode ser transformacao da mesma pessoa juridica ou sucessao. Aguardando confirmacao.",
+    "ALE COMBUSTIVEIS": "ARMADILHA: 'ALE COMBUSTÍVEIS S.A.' (2007-01..2012-03, 555 mil m3) NAO e a antecessora de 'ALE COMBUSTIVEIS S.A.' (2017-01..2026-09, 32.033 mil m3). Quem carrega o volume no historico e 'ALESAT COMBUSTÍVEIS S. A.' (2007-01..2016-12, 33.567 mil m3) -- que o detector NAO agrupa, porque a raiz e outra. Nao fundir sem decidir antes o caso ALESAT.",
+    "SAFRA DISTRIBUIDORA DE PETROLEO": "'... PETRÓLEO LTDA' em 2007-04..2009-03 (9 mil m3) e '... PETROLEO LTDA' em 2024-09..2025-06 (volume arredondado a zero). Quinze anos de intervalo: mais provavel serem pessoas juridicas diferentes reusando o nome do que a mesma com grafia nova. Nao fundir."
+  }
 }

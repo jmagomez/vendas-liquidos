@@ -64,7 +64,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data.js
+          git add data.js data/
           if git diff --cached --quiet; then
             echo "::notice::data.js sem alteração — nada a commitar."
             exit 0

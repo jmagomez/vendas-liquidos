@@ -128,6 +128,20 @@ def carregar_aliases(caminho) -> dict:
     return de
 
 
+def carregar_revisados(caminho) -> dict:
+    """Raizes ja olhadas e deliberadamente NAO fundidas, com o motivo.
+
+    Serve para a CI distinguir "candidato novo, ninguem olhou" de "candidato
+    conhecido, decisao registrada". Sem isso, so restariam dois extremos ruins:
+    falhar para sempre nos mesmos quatro, ou nao falhar nunca.
+    """
+    caminho = Path(caminho)
+    if not caminho.exists():
+        return {}
+    dados = json.loads(caminho.read_text(encoding="utf-8"))
+    return dict(dados.get("revisados") or {})
+
+
 def aplicar(agg, aliases: dict):
     """Aplica normalizacao tipografica e o mapa de aliases ao cubo agregado.
 
