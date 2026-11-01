@@ -165,17 +165,15 @@ def test_nome_real_corrompido_ainda_e_pego():
 def test_rotulos_reais_do_data_js_nao_disparam():
     """Varredura no artefato de producao: nenhum rotulo real pode ser acusado.
 
-    E o teste que teria evitado o run #18 -- o data.js commitado tem os ~370
+    E o teste que teria evitado o run #18 -- o artefato commitado tem os ~370
     rotulos que a ANP realmente publica, incluindo os nomes com 'ÇÃO' e 'ÂN'.
     """
-    import json
     from pathlib import Path
 
-    caminho = Path(__file__).resolve().parents[1] / "data.js"
-    if not caminho.exists():                      # pragma: no cover
-        pytest.skip("data.js nao presente")
-    bruto = caminho.read_text(encoding="utf-8").strip()
-    d = json.loads(bruto.removeprefix("window.VENDAS = ").rstrip(";\n"))
+    import data_js
+    d = data_js.carregar(Path(__file__).resolve().parents[1] / "data.js")
+    if d is None:                                 # pragma: no cover
+        pytest.skip("sem artefato de dados no repositorio")
     rotulos = [*d["comps"], *d["ufs"], *d["mkts"], *d.get("prods", []), *d["months"]]
     acusados = [r for r in rotulos if leitura.suspeita_mojibake(r)]
     assert not acusados, f"falso positivo em {len(acusados)}: {acusados[:5]}"
