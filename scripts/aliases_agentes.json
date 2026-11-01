@@ -1,0 +1,29 @@
+{
+  "_leia_me": [
+    "Mapa de aliases de agente regulado. Cada entrada FUNDE dois rotulos na serie",
+    "publicada, entao cada entrada muda numero publicado: participacao, ranking e,",
+    "sobretudo, HHI -- que e quadratico na participacao.",
+    "",
+    "Regras:",
+    "  - 'de' mapeia VARIANTE -> CANONICO. O canonico tem de existir nos dados.",
+    "  - 'motivos' e obrigatorio para cada variante: a rotina recusa alias sem motivo.",
+    "  - sem cadeias (A->B e B->C): resolva o mapa antes de commitar.",
+    "  - o canonico deve ser a grafia que a ANP usa hoje, copiada do arquivo.",
+    "",
+    "Antes de acrescentar uma entrada, confira que e de fato o MESMO agente",
+    "regulado (mesmo declarante), e nao duas pessoas juridicas da mesma marca.",
+    "Exemplo real do proprio arquivo, que NAO deve ser fundido:",
+    "  ARAPETRO DISTRIBUIDORA DE COMBUSTIVEIS LTDA",
+    "  ARAPETRO DISTRIBUIDORA DE PETROLEO LTDA.",
+    "",
+    "A rotina imprime, a cada rodada, os candidatos detectados (mesma raiz apos",
+    "remover acento, pontuacao e sufixo societario). Candidato nao e alias: e so",
+    "um lugar para olhar.",
+    "",
+    "Vazio de proposito: nos 217 agentes da serie 2017-2026 nao ha nenhuma",
+    "variante tipografica nem de sufixo societario. Preencher sem evidencia seria",
+    "mudar numero publicado por suposicao."
+  ],
+  "de": {},
+  "motivos": {}
+}
