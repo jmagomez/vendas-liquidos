@@ -6,7 +6,7 @@ contribui 200. Duplicar o rotulo de um agente grande derruba o indice quase
 pela metade sem mudar um unico metro cubico de volume -- e nenhuma trava de
 volume deste repositorio pegaria isso, porque o total nao muda.
 
-MEDICAO ANTES DO DESENHO (data.js de 2026-10, 217 agentes, 2017-01 a 2026-08):
+MEDICAO ANTES DO DESENHO (artefato de 2026-10, 217 agentes, 2017-01 a 2026-08):
 
     ruido tipografico puro (NFC + espacos duplicados): 0 nomes
     nomes que diferem so por sufixo societario:        0 grupos
@@ -22,12 +22,16 @@ Mesma marca, duas pessoas juridicas. Qualquer regra automatica por semelhanca
 as duas e publicaria um HHI mais alto do que o real, em silencio. E o erro
 simetrico ao que se queria evitar, e pior: inventado por nos, nao pela fonte.
 
+E quando a serie cresceu para 2007-2026 ficou pior: o detector por raiz
+agrupou 'ALE COMBUSTIVEIS S.A.' com 'ALE COMBUSTIVEIS S.A.' acentuada (555 mil
+m3, irrelevante) e NAO agrupou 'ALESAT COMBUSTIVEIS S. A.' (33.567 mil m3), que
+era a fusao que importava. Errou dos dois lados na mesma familia de nomes.
+
 DAI A DIVISAO EM DUAS CAMADAS:
 
 1. Normalizacao TIPOGRAFICA, automatica e irrestrita (`normalizar`): NFC e
    colapso de espacos. Nao funde nomes distintos -- so faz duas grafias
-   byte-diferentes do MESMO texto virarem uma. Hoje e no-op; e barata e
-   protege de ruido futuro.
+   byte-diferentes do MESMO texto virarem uma.
 
 2. Fusao por MAPA DE ALIASES versionado (`aplicar`), em scripts/aliases_agentes.json.
    Explicita, revisada em PR, com motivo registrado. Nenhum numero publicado
@@ -150,15 +154,21 @@ def aplicar(agg, aliases: dict):
     """
     agentes_antes = {normalizar(k[1]) for k in agg}
 
-    # O destino do alias tem de ser um nome que a ANP realmente publica. Conferir
-    # DEPOIS de aplicar nao serve para nada: o proprio alias teria criado o nome.
-    # Um ponto final a menos no mapa viraria um agente novo, com a grafia errada,
-    # e a fusao pretendida simplesmente nao aconteceria -- em silencio.
-    orfaos = sorted(set(aliases.values()) - agentes_antes)
-    if orfaos:
+    # Assinatura de erro de digitacao no mapa: a VARIANTE existe nos dados e o
+    # destino NAO. Nesse caso o alias renomearia um agente real para um nome que
+    # ninguem usa -- a fusao pretendida nao aconteceria e ninguem perceberia.
+    # Conferir depois de aplicar nao serve: o proprio alias teria criado o nome.
+    #
+    # Quando NENHUM dos dois aparece, o alias e apenas inerte (agente que parou
+    # de declarar, recorte menor, fixture de teste) e derrubar a rotina por isso
+    # seria trocar um silencio ruim por uma falha boba.
+    suspeitos = sorted(destino for variante, destino in aliases.items()
+                       if variante in agentes_antes and destino not in agentes_antes)
+    if suspeitos:
         raise RuntimeError(
-            f"{len(orfaos)} alias apontam para nome que nao aparece nos dados "
-            f"(erro de digitacao no mapa?): {orfaos[:5]}. data.js NAO foi alterado."
+            f"{len(suspeitos)} alias renomeiam um agente REAL para um nome que nao "
+            f"aparece nos dados (erro de digitacao no mapa?): {suspeitos[:5]}. "
+            "data.js NAO foi alterado."
         )
 
     novo = defaultdict(float)
