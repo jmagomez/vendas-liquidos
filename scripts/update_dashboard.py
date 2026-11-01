@@ -11,6 +11,7 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+import agentes as mod_agentes
 import data_js
 import leitura
 import membros as mod_membros
@@ -23,6 +24,9 @@ URL_CSV = ("https://www.gov.br/anp/pt-br/centrais-de-conteudo/dados-abertos/"
 ALVO_CSV = "Liquidos_Vendas_Atual.csv"
 BASE = Path(__file__).resolve().parents[1]
 OUT = BASE / "data.js"
+# Mapa de aliases de agente regulado. Vazio por padrao: cada entrada muda
+# numero publicado e exige decisao humana registrada (ver scripts/agentes.py).
+ALIASES = Path(__file__).resolve().parent / "aliases_agentes.json"
 
 TENTATIVAS = 4
 ESPERA_BASE = 10.0  # segundos; dobra a cada tentativa
@@ -533,6 +537,29 @@ def main():
     if herdados:
         print(f"[update] {len(herdados)} mes(es) HERDADOS do artefato anterior "
               f"(a fonte nao os traz): {', '.join(herdados)}")
+    # Canonicalizacao de agente. A normalizacao tipografica e automatica; a
+    # FUSAO so acontece pelo mapa de aliases versionado. Rotulo duplicado de
+    # um agente grande derruba o HHI quase pela metade sem mudar um metro
+    # cubico de volume -- e nenhuma trava de volume pegaria.
+    aliases = mod_agentes.carregar_aliases(ALIASES)
+    mes_ref = sorted({k[0] for k in agg})[-1]
+    hhi_antes = mod_agentes.hhi_do_mes(agg, mes_ref)
+    agg, fusoes = mod_agentes.aplicar(agg, aliases)
+    if fusoes:
+        hhi_depois = mod_agentes.hhi_do_mes(agg, mes_ref)
+        print(f"[update] {len(fusoes)} agente(s) canonicalizados; HHI de "
+              f"{mes_ref}: {hhi_antes:,.0f} -> {hhi_depois:,.0f} pontos")
+        for canonico, variantes in sorted(fusoes.items()):
+            print(f"[update]   {canonico} <- {variantes}")
+    # Candidatos a alias: reportados, NUNCA aplicados sozinhos.
+    candidatos = mod_agentes.detectar_variantes({k[1] for k in agg})
+    if candidatos:
+        print(f"[update] {len(candidatos)} grupo(s) de nomes parecidos — "
+              "candidatos a alias, nao aplicados:")
+        for raiz, nomes in sorted(candidatos.items())[:10]:
+            print(f"[update]   {raiz}: {nomes}")
+    stats["fusoes_agente"] = {k: v for k, v in fusoes.items()}
+    stats["variantes_detectadas"] = candidatos
     fonte = resumir_fonte(membros, stats, herdados)
     print(f"[update] fonte sha256:{fonte['sha256']} ({fonte['bytes']:,} bytes)")
     data = gerar_data_js(agg, fonte)
