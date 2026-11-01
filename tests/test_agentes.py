@@ -166,18 +166,37 @@ def test_mapa_do_repo_e_valido():
     agentes.carregar_aliases(caminho)   # nao levanta
 
 
-def test_agentes_reais_do_data_js_nao_tem_variante():
-    """Varredura no artefato: nenhum par de agentes reais compartilha raiz.
+def test_todo_candidato_real_esta_declarado():
+    """Varredura no artefato: todo candidato detectado tem de estar declarado.
 
-    E a medicao que justificou o mapa de aliases estar vazio. Se um dia este
-    teste falhar, apareceu um candidato de verdade — para olhar, nao para
-    fundir automaticamente.
+    Em `de` (fundir) ou em `revisados` (olhado e nao fundido, com motivo).
+    Candidato NOVO quebra a CI de proposito: e assim que se descobre no dia,
+    e nao meses depois, que a serie de um agente esta partida em duas grafias.
+
+    Foi este teste que apontou os quatro candidatos quando a serie passou de
+    2017-2026 para 2007-2026 -- inclusive a armadilha do ALE/ALESAT.
     """
-    caminho = os.path.join(os.path.dirname(__file__), "..", "data.js")
-    if not os.path.exists(caminho):            # pragma: no cover
-        pytest.skip("data.js nao presente")
-    with open(caminho, encoding="utf-8") as fh:
-        bruto = fh.read().strip()
-    d = json.loads(bruto.removeprefix("window.VENDAS = ").rstrip(";\n"))
-    grupos = agentes.detectar_variantes(d["comps"])
-    assert not grupos, f"candidatos a alias apareceram: {list(grupos)[:5]}"
+    base = os.path.join(os.path.dirname(__file__), "..")
+    import data_js
+    d = data_js.carregar(os.path.join(base, "data.js"))
+    if d is None:                              # pragma: no cover
+        pytest.skip("sem artefato de dados no repositorio")
+
+    mapa = os.path.join(base, "scripts", "aliases_agentes.json")
+    declarados = set(agentes.carregar_revisados(mapa))
+    for variante, canonico in agentes.carregar_aliases(mapa).items():
+        declarados.add(agentes.raiz_comparavel(canonico))
+
+    nao_declarados = sorted(set(agentes.detectar_variantes(d["comps"])) - declarados)
+    assert not nao_declarados, (
+        f"{len(nao_declarados)} candidato(s) a alias sem decisao registrada: "
+        f"{nao_declarados}. Olhe as janelas de cada grafia e registre em "
+        "scripts/aliases_agentes.json, em 'de' (fundir) ou 'revisados' (nao fundir).")
+
+
+def test_revisados_tem_motivo_de_verdade():
+    """Motivo de uma linha nao e motivo: tem de dizer o que foi medido."""
+    mapa = os.path.join(os.path.dirname(__file__), "..", "scripts",
+                        "aliases_agentes.json")
+    for raiz, motivo in agentes.carregar_revisados(mapa).items():
+        assert len(motivo) > 80, f"{raiz}: motivo curto demais"
