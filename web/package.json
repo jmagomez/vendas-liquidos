@@ -1,0 +1,25 @@
+{
+  "name": "vendas-liquidos-painel",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Painel de vendas de combustiveis liquidos (ANP) — Vite + React + TypeScript",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit"
+  },
+  "dependencies": {
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "recharts": "2.15.4"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "4.7.0",
+    "typescript": "5.7.3",
+    "vite": "6.4.5"
+  }
+}

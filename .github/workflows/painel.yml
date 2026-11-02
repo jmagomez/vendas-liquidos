@@ -1,0 +1,64 @@
+name: Constroi o painel novo (Vite)
+
+# O bundle tem ~650 KB e e GERADO: nao entra no repositorio pela mao de
+# ninguem. Este workflow compila web/ e commita o resultado em painel/, que o
+# GitHub Pages serve ao lado do painel antigo -- da para comparar os dois antes
+# de trocar a raiz.
+#
+# So roda quando o CODIGO do painel muda. Rodada de dados nao reconstroi nada:
+# o painel le data/ em tempo de execucao, nao em tempo de build.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - ".github/workflows/painel.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: painel
+  cancel-in-progress: true
+
+jobs:
+  construir:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Sem package-lock.json no repositorio: as versoes diretas estao fixadas
+      # (sem ^) no package.json, o que da reprodutibilidade das dependencias
+      # diretas. Transitivas podem variar -- e o preco de nao versionar o lock.
+      - name: Instala e constroi
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Publica em painel/
+        run: |
+          rm -rf painel
+          mkdir -p painel
+          cp -r web/dist/. painel/
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add painel
+          if git diff --cached --quiet; then
+            echo "::notice::painel/ sem alteracao — nada a commitar."
+            exit 0
+          fi
+          git commit -m "Reconstroi o painel (Vite)"
+          for tentativa in 1 2 3; do
+            git push && exit 0
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
+            sleep 5
+          done
+          echo "::error::nao consegui dar push apos 3 tentativas"; exit 1

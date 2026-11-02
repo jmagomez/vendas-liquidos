@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 import agentes  # noqa: E402
 
-# Caso real do data.js: mesma marca, duas pessoas juridicas. NAO pode fundir.
+# Caso real do artefato: mesma marca, duas pessoas juridicas. NAO pode fundir.
 ARAPETRO = ["ARAPETRO DISTRIBUIDORA DE COMBUSTIVEIS LTDA",
             "ARAPETRO DISTRIBUIDORA DE PETRÓLEO LTDA."]
 
@@ -119,11 +119,29 @@ def test_alias_para_si_mesmo_derruba(tmp_path):
 
 def test_alias_com_destino_inexistente_derruba(tmp_path):
     """Erro de digitacao no mapa falharia em silencio: a fusao simplesmente
-    nao aconteceria e ninguem perceberia."""
+    nao aconteceria e ninguem perceberia.
+
+    Assinatura: a VARIANTE existe nos dados e o destino nao.
+    """
     p = mapa(tmp_path, {"POSTO X LTDA": "POSTO X S.A"})   # falta o ponto final
     agg = cubo(("POSTO X LTDA", 10.0), ("POSTO X S.A.", 6.0))
     with pytest.raises(RuntimeError, match="nao aparece nos dados"):
         agentes.aplicar(agg, agentes.carregar_aliases(p))
+
+
+def test_alias_inerte_nao_derruba(tmp_path):
+    """Alias cuja variante nao aparece no recorte e inerte, nao erro.
+
+    Agente que parou de declarar, recorte menor, fixture de teste: derrubar a
+    rotina nesses casos trocaria um silencio ruim por uma falha boba. A trava
+    existe para a assinatura do ERRO DE DIGITACAO -- variante presente, destino
+    ausente --, que esta no teste anterior.
+    """
+    p = mapa(tmp_path, {"SUMIU LTDA": "NOME QUE NAO APARECE"})
+    agg = cubo(("TERCEIRO S.A.", 1.0))
+    novo_agg, fusoes = agentes.aplicar(agg, agentes.carregar_aliases(p))
+    assert fusoes == {}
+    assert {k[1] for k in novo_agg} == {"TERCEIRO S.A."}
 
 
 def test_fusao_excessiva_derruba(tmp_path):

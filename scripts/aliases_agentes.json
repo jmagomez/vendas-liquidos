@@ -24,17 +24,26 @@
     "que ninguem descubra por acaso, meses depois, que a serie de um agente",
     "estava partida em duas.",
     "",
-    "Com a serie de 2007-2026 (318 agentes) apareceram quatro candidatos. Nenhum",
-    "foi fundido ainda, e fundir qualquer um deles NAO muda numero mensal nenhum:",
-    "as grafias tem janelas DISJUNTAS, nenhum mes tem as duas. O efeito e so na",
-    "continuidade da serie por agente e no filtro de companhia."
+    "Fundir duas grafias de janelas DISJUNTAS nao muda numero mensal nenhum: o",
+    "efeito e na continuidade da serie por agente e no filtro de companhia. Ja",
+    "fundir grafias que COEXISTEM em algum mes muda a participacao e o HHI",
+    "daquele mes -- meca antes, e registre a medicao no motivo.",
+    "",
+    "Estado em 2026-11-01: a familia ALE foi fundida (ALESAT + grafia acentuada ->",
+    "'ALE COMBUSTIVEIS S.A.'), confirmada como mesmo agente. Os outros tres",
+    "candidatos seguem em 'revisados', nao fundidos."
   ],
-  "de": {},
-  "motivos": {},
+  "de": {
+    "ALESAT COMBUSTÍVEIS S. A.": "ALE COMBUSTIVEIS S.A.",
+    "ALE COMBUSTÍVEIS S.A.": "ALE COMBUSTIVEIS S.A."
+  },
+  "motivos": {
+    "ALESAT COMBUSTÍVEIS S. A.": "Mesmo agente, confirmado por Jose (Petrobras, 2026-11-01). A ALESAT e a razao social que declarou de 2007-01 a 2016-12 (33.567 mil m3); 'ALE COMBUSTIVEIS S.A.' e a grafia do arquivo atual, de 2017-01 em diante (32.033 mil m3). Janelas disjuntas e volumes da mesma ordem. Canonico = grafia que a ANP usa hoje.",
+    "ALE COMBUSTÍVEIS S.A.": "Mesma empresa, grafia acentuada que aparece de 2007-01 a 2012-03 (555 mil m3) em paralelo com a ALESAT. Por coexistir com a ALESAT em 31 meses, esta e a UNICA parte da fusao que muda numero mensal: medido antes de aplicar, o HHI de 2007-01 a 2012-03 sobe entre 0 e 3 pontos (ex.: 2007-01, 2.096 -> 2.098) e o volume total nao muda em nenhum mes. Fora dessa janela, zero efeito."
+  },
   "revisados": {
     "SIMARELLI DISTRIBUIDORA DE DERIVADOS DE PETROLEO": "2007-01..2016-12 como '... PETRÓLEO LTDA.' (1.948 mil m3) e 2017-01..2026-09 como '... PETROLEO S.A.' (1.456 mil m3). A quebra cai EXATAMENTE na fronteira entre os dois arquivos da ANP (historico ate 2016-12, atual a partir de 2017-01), o que aponta para diferenca de grafia entre arquivos, nao troca de empresa. Forte candidato a fusao; aguardando confirmacao.",
     "JOAPI DISTRIBUIDORA DE COMBUSTIVEIS": "2013-05..2016-12 como 'LTDA' (109 mil m3) e 2017-01..2026-09 como 'S.A.' (18 mil m3). Tambem quebra na fronteira dos arquivos, mas aqui muda o tipo societario (Ltda -> S.A.), que pode ser transformacao da mesma pessoa juridica ou sucessao. Aguardando confirmacao.",
-    "ALE COMBUSTIVEIS": "ARMADILHA: 'ALE COMBUSTÍVEIS S.A.' (2007-01..2012-03, 555 mil m3) NAO e a antecessora de 'ALE COMBUSTIVEIS S.A.' (2017-01..2026-09, 32.033 mil m3). Quem carrega o volume no historico e 'ALESAT COMBUSTÍVEIS S. A.' (2007-01..2016-12, 33.567 mil m3) -- que o detector NAO agrupa, porque a raiz e outra. Nao fundir sem decidir antes o caso ALESAT.",
     "SAFRA DISTRIBUIDORA DE PETROLEO": "'... PETRÓLEO LTDA' em 2007-04..2009-03 (9 mil m3) e '... PETROLEO LTDA' em 2024-09..2025-06 (volume arredondado a zero). Quinze anos de intervalo: mais provavel serem pessoas juridicas diferentes reusando o nome do que a mesma com grafia nova. Nao fundir."
   }
 }

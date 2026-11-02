@@ -1,60 +1,43 @@
-"""Leitura, escrita e decodificacao do data.js.
+"""Leitura e escrita dos artefatos de dados do painel.
 
-Antes deste modulo o formato do data.js estava implementado tres vezes: no
-script de atualizacao, no Python embutido no workflow (que monta o e-mail) e no
+Antes deste modulo o formato estava implementado tres vezes: no script de
+atualizacao, no Python embutido no workflow (que monta o e-mail) e no
 JavaScript do dashboard. Tres copias da mesma regra de decodificacao e tres
 chances de uma delas ficar para tras: quando o produto entrou na chave e as
 linhas passaram de 5 para 6 campos, uma copia desatualizada nao daria erro
 nenhum -- somaria os campos errados e reportaria numeros inventados com cara de
-certos. As duas copias Python agora vivem aqui; o dashboard le `campos` do
-proprio arquivo, que e o mesmo contrato.
+certos. As duas copias Python vivem aqui; o painel le `campos` do proprio
+artefato, que e o mesmo contrato.
 """
-import json
-import os
 from pathlib import Path
 
 import cubos
 
-# Numero e ordem dos campos por linha em data.js["rows"]. Fica gravado no
-# proprio arquivo (chave "campos") para que quem le nao precise assumir o passo.
+# Numero e ordem dos campos por linha em rows. Fica gravado no proprio artefato
+# (chave "campos") para que quem le nao precise assumir o passo.
 CAMPOS = ["mes", "comp", "uf", "mkt", "prod", "qtd"]
 
-# Formato anterior a entrada do produto na chave. Usado so quando o arquivo lido
-# nao traz a marca "campos" -- assumir o formato novo ali produziria numeros
-# errados em silencio.
+# Formato anterior a entrada do produto na chave. `campos_de` cai aqui se a
+# marca faltar -- assumir o formato novo produziria numeros errados em silencio.
 CAMPOS_LEGADO = ["mes", "comp", "uf", "mkt", "qtd"]
-
-PREFIXO = "window.VENDAS = "
 
 # Quantidades sao gravadas como inteiro: mil m3 com 4 casas decimais.
 ESCALA = 10000
 
 
 def carregar(caminho: Path):
-    """Le o artefato anterior. None se nao houver nenhum legivel.
+    """Le o artefato anterior de `data/`, ao lado do caminho dado. None se nao houver.
 
-    A partir de 2026-11 o artefato canonico e `data/` ao lado do caminho dado
-    (meta.json + cubo.bin.gz, ~2,1 MB); o data.js virou um carregador de 2 KB.
-    A leitura do data.js ANTIGO continua aqui como recuo porque a primeira
-    rodada depois da migracao ainda encontra o arquivo velho no repositorio --
-    e e dele que vem a lacuna de 2017, que seria perdida se `carregar`
-    devolvesse None.
+    Ate 2026-11 isto lia um data.js de 13,9 MB com tudo dentro. A migracao para
+    `data/` (meta.json + cubo.bin.gz) ja rodou, e o recuo que lia o formato
+    antigo foi removido junto: manter duas formas de ler o artefato na arvore
+    convida a proxima pessoa a "dar suporte" as duas para sempre.
+
+    Se `data/` sumir, isto devolve None e a rodada NAO remenda nada -- a trava
+    de regressao barra o encolhimento da serie e a rotina para alto, que e o
+    desfecho correto.
     """
-    caminho = Path(caminho)
-    d = cubos.ler(caminho.parent)
-    if d is not None:
-        return d
-    if not caminho.exists():
-        return None
-    try:
-        bruto = caminho.read_text(encoding="utf-8").strip()
-        if not bruto.startswith(PREFIXO):
-            # Ja e o carregador, e data/ nao existe: nao ha artefato anterior.
-            return None
-        return json.loads(bruto.removeprefix(PREFIXO).rstrip(";\n"))
-    except Exception as exc:  # noqa: BLE001
-        print(f"[data_js] aviso: nao consegui ler {caminho} ({exc})")
-        return None
+    return cubos.ler(Path(caminho).parent)
 
 
 def escrever(caminho: Path, data: dict) -> None:
@@ -66,9 +49,9 @@ def escrever(caminho: Path, data: dict) -> None:
 
         data/meta.json      dimensoes, marcas e proveniencia   (~18 KB)
         data/cubo.bin.gz    as linhas, colunar e comprimido    (~2,1 MB)
-        data/cubo-mes-*.json  cubos marginais, para o painel ter numero
-                              na tela antes do cubo completo chegar
-        data.js             ~2 KB que buscam o que esta acima
+        data/cubo-mes-*.json  cubos marginais, de onde o painel novo tira a
+                              tela inteira sem baixar o cubo completo
+        data.js             ~3 KB que buscam o que esta acima
 
     Cada arquivo e escrito de forma atomica (tmp + os.replace), pelo mesmo
     motivo de sempre: um job interrompido no meio nao pode deixar artefato
@@ -80,7 +63,7 @@ def escrever(caminho: Path, data: dict) -> None:
 
 
 def campos_de(d: dict):
-    """Esquema do arquivo lido, com fallback explicito para o formato antigo."""
+    """Esquema do artefato lido, com fallback explicito para o formato antigo."""
     return d.get("campos") or CAMPOS_LEGADO
 
 
@@ -95,7 +78,7 @@ def iter_linhas(d: dict):
     """Percorre as linhas ja decodificadas.
 
     Devolve (mes, comp, uf, mkt, prod, qtd) com indices inteiros e qtd em
-    mil m3 (float). `prod` vem None em arquivos do formato antigo.
+    mil m3 (float). `prod` vem None em artefatos do formato antigo.
     """
     idx, passo = indices(d)
     rows = d["rows"]
@@ -124,7 +107,7 @@ def volume_por_mes(d: dict):
 def parciais(d: dict):
     """Meses que a ANP ainda nao consolidou, conforme gravado pela rotina.
 
-    Arquivos gerados antes desta marca nao tem a chave: devolvem lista vazia,
+    Artefatos gerados antes desta marca nao tem a chave: devolvem lista vazia,
     que e o comportamento antigo (todo mes tratado como fechado).
     """
     return list(d.get("parciais") or [])
