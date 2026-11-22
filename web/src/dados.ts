@@ -7,15 +7,23 @@
  * mensal, mix, ranking, HHI) sai de agregados por mes x uma dimensao.
  *
  * O cubo completo so e necessario para CRUZAR duas dimensoes (agente x UF, por
- * exemplo). Enquanto o painel nao oferecer esse cruzamento, nao ha motivo para
- * baixa-lo -- e quando oferecer, ele entra sob demanda, nao no caminho critico.
+ * exemplo) -- a margem de uma dimensao ja somou todas as outras. Ele existe e
+ * e usado, mas entra SOB DEMANDA, quando o usuario pede o cruzamento ou a
+ * concentracao por UF, nunca no caminho critico do primeiro desenho. Ver
+ * cruzamento.ts.
  */
 
 // Quantidades vem como inteiro: mil m3 com 4 casas decimais (ver data_js.ESCALA).
 export const ESCALA = 10000;
 
-/** Os dados moram um nivel acima: /vendas-liquidos/data/, nao /painel/data/. */
-const BASE_DADOS = new URL("../data/", window.location.href).href;
+/** Os dados moram um nivel acima: /vendas-liquidos/data/, nao /painel/data/.
+ *
+ * Funcao, e nao constante: constante leria `window` no momento do import, o que
+ * amarra o modulo a um navegador presente. Os testes importam estes tipos sem
+ * DOM nenhum. */
+export function baseDados(): string {
+  return new URL("../data/", window.location.href).href;
+}
 
 export type Meta = {
   months: string[];
@@ -27,6 +35,18 @@ export type Meta = {
   parciais: string[];
   ultimo_completo: string | null;
   herdados?: string[];
+  /** Onde a fonte passa a cobrir cada produto -- ver scripts/cobertura.py. */
+  cobertura?: {
+    inicio_comparavel: string | null;
+    por_produto: Record<string, {
+      inicio: string | null;
+      antes_12m?: number;
+      depois_12m?: number;
+      razao?: number;
+    }>;
+  };
+  /** Valores da coluna de UF que nao sao estados (hoje: "NI"). */
+  ufs_nao_geograficas?: string[];
   n_linhas: number;
   updated: string;
   fonte: {
@@ -38,6 +58,12 @@ export type Meta = {
     linhas?: number;
     fusoes_agente?: Record<string, string[]>;
     variantes_detectadas?: Record<string, string[]>;
+    divergencias_de_rotulo?: {
+      membro: string;
+      declarado: [string, string];
+      real: [string, string];
+      faltando: string[];
+    }[];
   };
 };
 
@@ -69,7 +95,7 @@ export const NOME_DIM: Record<Dimensao, string> = {
 };
 
 async function pedir<T>(arquivo: string): Promise<T> {
-  const r = await fetch(BASE_DADOS + arquivo);
+  const r = await fetch(baseDados() + arquivo);
   if (!r.ok) throw new Error(`${arquivo}: HTTP ${r.status}`);
   return (await r.json()) as T;
 }

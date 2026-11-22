@@ -30,3 +30,45 @@ rodape,footer{color:var(--mudo);font-size:.78rem;text-align:center;margin-top:24
 .carregando{color:var(--mudo);text-align:center;padding:60px 0;font-size:.9rem}
 @media(max-width:640px){body{padding:12px}.painel{padding:12px}h1{font-size:1.1rem}
   .cartoes{grid-template-columns:repeat(2,1fr);gap:8px}}
+
+/* --- Tabelas largas e botoes dos paineis sob demanda --------------------- */
+.rolagem { overflow-x: auto; }
+.rolagem table { min-width: 100%; }
+
+.botao {
+  background: #21262d;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: .9rem;
+  cursor: pointer;
+}
+.botao:hover:not(:disabled) { background: #30363d; border-color: #58a6ff; }
+.botao:disabled { opacity: .6; cursor: progress; }
+
+/* --- Impressao -----------------------------------------------------------
+   O painel e escuro na tela e seria 20 paginas de toner preto no papel. Aqui
+   ele vira claro, os filtros saem (ninguem clica num select impresso) e os
+   avisos de cobertura, mes nao consolidado e meses herdados FICAM: a ressalva
+   e o que impede o grafico impresso de ser lido fora de contexto, e papel
+   circula mais longe do autor do que a tela. */
+@media print {
+  :root { color-scheme: light; }
+  body { background: #fff; color: #111; }
+  .container { max-width: none; padding: 0; }
+  .filtros, .botao { display: none !important; }
+  .painel, .cartao {
+    background: #fff;
+    border: 1px solid #bbb;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  h1, h2, .val { color: #111; }
+  .nota, .sub, .rot, .periodo, footer { color: #444; }
+  .aviso { border: 1px solid #333; background: #f4f4f4; color: #111; }
+  .aviso.erro { border-left: 4px solid #000; }
+  table.rank th, table.rank td { border-color: #ccc; color: #111; }
+  a[href]::after { content: ""; }
+}

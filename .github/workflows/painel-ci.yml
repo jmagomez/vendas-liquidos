@@ -1,0 +1,59 @@
+# CI do painel novo (web/). Separado do ci.yml de proposito, por duas razoes:
+#
+# 1. o ci.yml e template compartilhado com outros repositorios e ignora
+#    `data/**` no gatilho -- o que esta certo para a suite Python, mas aqui o
+#    canario `web/src/artefato.test.ts` LE o `data/` versionado. Uma rodada de
+#    dados que mudasse o formato do artefato nao reexecutaria a reconciliacao
+#    justamente na vez que importa;
+# 2. o GitHub App usado para abrir PRs aqui nao tem escopo `workflow`, entao
+#    arquivo novo e mais facil de versionar que edicao no ci.yml.
+#
+# O que isto pega e que antes nao era pego: erro de TypeScript em web/ passava
+# no PR e so quebrava DEPOIS do merge, na build do painel.yml -- com o main ja
+# sujo e o painel no ar parado na versao anterior.
+name: CI do painel
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "web/**"
+      - "data/**"
+      - ".github/workflows/painel-ci.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - "data/**"
+      - ".github/workflows/painel-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  painel:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Sem package-lock.json versionado (mesma situacao do painel.yml): as
+      # versoes diretas estao fixadas sem `^` no package.json, as transitivas
+      # podem variar entre duas rodadas. Versionar o lock e o proximo passo
+      # obvio aqui -- e o que faria o bundle publicado ser funcao so do codigo.
+      - name: Instalar dependencias
+        run: npm install --no-audit --no-fund
+
+      - name: Tipos (tsc)
+        run: npm run typecheck
+
+      - name: Testes (vitest)
+        run: npm test
+
+      - name: Build
+        run: npm run build

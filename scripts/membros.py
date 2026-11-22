@@ -205,3 +205,47 @@ def herdar_lacunas(agg, anterior, max_herdados: int = MAX_MESES_HERDADOS) -> lis
                      anterior["mkts"][k], anterior["prods"][p])
             agg[chave] = agg.get(chave, 0.0) + q
     return sorted(lacunas)
+
+
+# Nome do membro historico da ANP: "..._Historico_2007_a_2017.csv".
+PADRAO_FAIXA_DECLARADA = re.compile(r"(\d{4})_a_(\d{4})", re.IGNORECASE)
+
+
+def faixa_declarada(nome: str) -> tuple[str, str] | None:
+    """Faixa que o NOME do arquivo promete, se ele promete alguma.
+
+    O nome nao e dado: e rotulo. Mas quando rotulo e conteudo divergem, isso
+    tem de ficar escrito no artefato, nao descoberto por acidente.
+    """
+    m = PADRAO_FAIXA_DECLARADA.search(nome.rsplit("/", 1)[-1])
+    if not m:
+        return None
+    return f"{m.group(1)}-01", f"{m.group(2)}-12"
+
+
+def divergencias_de_rotulo(cobertura_por_membro: dict) -> list:
+    """Membros cujo nome promete mais meses do que o conteudo entrega.
+
+    O caso real: `Liquidos_Vendas_Historico_2007_a_2017.csv` cobre 2007-01 a
+    2016-12. O ano de 2017 inteiro NAO esta nele, apesar do nome -- e e por isso
+    que 2017 tem de ser herdado do artefato anterior, ou seja, deixou de ser
+    reproduzivel a partir do zip de hoje. Reportado, nunca "corrigido": o
+    arquivo e o que e, e quem le o painel precisa saber disso.
+    """
+    out = []
+    for nome, meses in sorted(cobertura_por_membro.items()):
+        faixa = faixa_declarada(nome)
+        if not faixa or not meses:
+            continue
+        declarado_ini, declarado_fim = faixa
+        real_ini, real_fim = min(meses), max(meses)
+        if real_ini > declarado_ini or real_fim < declarado_fim:
+            out.append({
+                "membro": nome,
+                "declarado": [declarado_ini, declarado_fim],
+                "real": [real_ini, real_fim],
+                "faltando": (meses_entre(declarado_ini, declarado_fim)
+                             and [m for m in meses_entre(declarado_ini, declarado_fim)
+                                  if m not in set(meses)]),
+            })
+    return out
