@@ -41,13 +41,15 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
-      # Sem package-lock.json versionado (mesma situacao do painel.yml): as
-      # versoes diretas estao fixadas sem `^` no package.json, as transitivas
-      # podem variar entre duas rodadas. Versionar o lock e o proximo passo
-      # obvio aqui -- e o que faria o bundle publicado ser funcao so do codigo.
+      # `npm ci`, e nao `npm install`: instala exatamente a arvore do lock e
+      # FALHA se o lock e o package.json discordarem. Com `npm install` a CI
+      # conserta a divergencia em silencio e testa uma arvore que nao e a que
+      # esta versionada -- o verde nao significaria o que parece.
       - name: Instalar dependencias
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Tipos (tsc)
         run: npm run typecheck
