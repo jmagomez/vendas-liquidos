@@ -20,7 +20,7 @@ import {
   Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { baseDados, rotulos, type Dados } from "./dados";
-import { fmt, fmt1, fmtPct, hhi } from "./financeiro";
+import { fmt, fmt1, fmtPct, formatador, hhi } from "./financeiro";
 import { cr } from "./setor";
 import { carregarCubo, cruzar, type Cubo } from "./cruzamento";
 
@@ -90,7 +90,7 @@ export default function ConcentracaoUf({ dados, meses, rotuloJanela }:
               <Tooltip
                 contentStyle={{ background: "#161b22", border: "1px solid #30363d", borderRadius: 8 }}
                 labelStyle={{ color: "#e6edf3" }}
-                formatter={(v: number) => fmt.format(v)} />
+                formatter={formatador((v) => fmt.format(v))} />
               <Bar dataKey="hhi" name="HHI">
                 {linhas.slice(0, 15).map((d, i) => (
                   <Cell key={i} fill={(d.hhi ?? 0) >= ALTO ? "#f85149"
