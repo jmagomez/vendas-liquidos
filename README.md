@@ -2,23 +2,49 @@
 
 Dashboard interativo com as vendas mensais de combustíveis líquidos por distribuidora (dados abertos da ANP), com filtros por companhia, estado (UF de destino), tipo de consumidor, combustível e período, série de variação anual, evolução do mix, ranking de companhias, indicadores de estrutura de mercado e exportação em CSV.
 
-**Dashboard:** https://jmagomez.github.io/vendas-liquidos/
+**Dashboard (Chart.js, painel original):** https://jmagomez.github.io/vendas-liquidos/
+
+**Painel novo (Vite + React + TypeScript):** https://jmagomez.github.io/vendas-liquidos/painel/
+
+Os dois leem o MESMO artefato em `data/` — uma fonte, não duas. O painel novo
+abre com 229 KB em vez de 3,5 MB bloqueantes, traz as métricas setoriais em base
+energética e os avisos de cobertura descritos abaixo; o original segue na raiz
+para comparação lado a lado enquanto o cruzamento, a exportação e a impressão do
+novo não tiverem substituído tudo o que ele faz.
 
 ## Estrutura
 
 ```
 vendas-liquidos/
 ├── scripts/
-│   ├── update_dashboard.py   # baixa o CSV da ANP, agrega e gera data.js
-│   ├── data_js.py            # leitura/escrita do data.js (contrato único)
+│   ├── update_dashboard.py   # baixa o zip da ANP, agrega e gera o artefato
+│   ├── leitura.py            # detecção de encoding e trava de mojibake
+│   ├── membros.py            # leitura multi-membro do zip, lacunas, rótulos
+│   ├── agentes.py            # canonicalização de nome de agente regulado
+│   ├── cobertura.py          # onde a fonte passa a cobrir cada produto
+│   ├── cubos.py              # formato binário colunar + cubos marginais
+│   ├── data_js.py            # leitura/escrita do artefato (contrato único)
 │   └── resumo_email.py       # monta o resumo do e-mail mensal
-├── data.js                   # dados agregados (mês × companhia × UF × mercado × produto)
-├── index.html                # dashboard (GitHub Pages)
-├── vendor/chart.umd.js       # Chart.js versionado (gerado pelo workflow vendorizar)
+├── data/                     # artefato que o painel carrega
+│   ├── meta.json             # dimensões, marcas de qualidade, proveniência
+│   ├── cubo.bin.gz           # 725 mil linhas, colunar, 2,1 MB
+│   └── cubo-mes-*.json       # marginais (mês × dimensão), 229 KB no total
+├── data.js                   # carregador de 3 KB (era 13,9 MB de JSON)
+├── index.html                # painel antigo (Chart.js, na raiz)
+├── web/                      # painel novo (Vite + React + TypeScript)
+│   └── src/
+│       ├── dados.ts          # carga dos cubos marginais
+│       ├── financeiro.ts     # série, média móvel, a/a, HHI
+│       ├── setor.ts          # ciclo Otto em base energética, CR4
+│       ├── cruzamento.ts     # cubo completo sob demanda + CSV
+│       └── *.test.ts         # vitest, inclusive canário no artefato real
+├── painel/                   # bundle publicado (gerado, não editado à mão)
 └── .github/workflows/
     ├── update-dashboard.yml  # rotina (dias 5 e 28) + e-mail
+    ├── painel.yml            # compila web/ e publica em painel/
+    ├── diagnostico-zip.yml   # só lista os membros do zip, não escreve nada
     ├── vendorizar.yml        # sob demanda: baixa o Chart.js para vendor/
-    └── ci.yml                # ruff + pytest
+    └── ci.yml                # ruff + pytest + tsc + vitest + build
 ```
 
 ## Rotina automática
@@ -46,7 +72,7 @@ O workflow lê `MAIL_PASSWORD_ANP`, não `MAIL_PASSWORD`.
 
 ## Integridade dos dados
 
-A rotina falha alto em vez de gravar dados ruins. São seis travas, e cada uma
+A rotina falha alto em vez de gravar dados ruins. São oito travas, e cada uma
 existe por causa de um jeito concreto de o número sair errado sem ninguém notar:
 
 1. **Cabeçalho conferido por nome.** Contar colunas pega inserção no fim; não
@@ -69,6 +95,26 @@ existe por causa de um jeito concreto de o número sair errado sem ninguém nota
    `write_text` que morre pela metade deixa JSON inválido — dashboard em branco e,
    pior, a próxima execução sem a base de comparação contra a qual as travas 4 e
    5 existem.
+
+7. **Janela comparável por produto.** Medido no artefato de 2026-11-05, o
+   Diesel B sai de 46 mil m³ em dez/2009 para 3.037 em mar/2010: a fonte da ANP
+   só passa a trazer diesel em 2010, e o diesel é metade do mercado. Somar
+   2007-2009 com 2010 em diante mostra um mercado triplicando por artefato de
+   cobertura — e o HHI de 2007-2009, calculado sem as distribuidoras de diesel,
+   é o índice de outro mercado com o mesmo nome. Nenhuma trava de volume pega
+   isso: os números de 2007-2009 estão **certos para o que a fonte traz**, e o
+   que está errado é compará-los. `scripts/cobertura.py` detecta o degrau
+   (12 meses somando menos de 10% dos 12 seguintes), grava
+   `cobertura.inicio_comparavel` no artefato, e a rotina falha se a janela
+   **encurtar** de uma rodada para a outra. A comparação é entre janelas
+   vizinhas, nunca contra o máximo da série: o Óleo Comb. cai 80% em 18 anos de
+   verdade, e contra o máximo seria acusado e truncaria a série.
+8. **Rótulo do arquivo conferido contra o conteúdo.**
+   `Liquidos_Vendas_Historico_2007_a_2017.csv` cobre 2007-01 a **2016-12**. O ano
+   de 2017 inteiro não está nele, apesar do nome — é por isso que 2017 precisa
+   ser herdado do artefato anterior, ou seja, **deixou de ser reproduzível a
+   partir do zip de hoje**. A divergência é reportada no artefato e aparece no
+   painel; não é "corrigida", porque o arquivo é o que é.
 
 Em todos os casos o `data.js` não é tocado e o workflow dispara o e-mail de falha.
 
@@ -129,6 +175,76 @@ ficam contados no log, porque um *salto* nessa contagem seria sinal de outra
 coisa. (O número antigo aqui, "~185", contava combinações agregadas negativas no
 `data.js`, não linhas do CSV — duas coisas diferentes.)
 
+## Métricas setoriais (painel novo)
+
+### Ciclo Otto em base energética
+
+Um litro de etanol hidratado não substitui um litro de gasolina C: o PCI do
+hidratado é ~21,3 MJ/L contra ~29,0 MJ/L da gasolina C com E32 — 73,5%. Ler o
+mix por litro, como o painel antigo faz, superestima o etanol. Medido em
+set/2026 (3.874 mil m³ de gasolina C e 2.028 de hidratado):
+
+| | |
+|---|---|
+| Hidratado, participação em **volume** | 34,4% |
+| Hidratado, participação em **energia** | 27,8% |
+| Diferença | **6,6 pontos** |
+| **Etanol total** no ciclo Otto (hidratado + anidro) | **45,6%** |
+| Teor de anidro na gasolina C | 32,0% |
+| Paridade de rendimento | 73,5% |
+
+O "etanol total" é o número que o setor usa: o anidro misturado na gasolina C
+também é etanol, e com E32 quase um terço do que se vende como gasolina é
+etanol. As duas leituras ficam na tela juntas — a de volume responde "quantos
+litros" (pergunta logística) e a de energia responde "quanta energia" (pergunta
+de substituição). Nenhuma substitui a outra.
+
+A paridade de rendimento é a regra dos "70%" do posto, que **deixou de ser 70%**
+quando o teor subiu: 72,2% com E27, 73,0% com E30, 73,5% com E32.
+
+O teor de anidro vem de tabela datada em `web/src/setor.ts`, ponderada por dia
+dentro do mês — o E27 entrou em 16/03/2015, e carimbar 27% em março inteiro
+erraria o mês. Entradas: E20 out/2011, E25 01/05/2013, E27 16/03/2015, E30
+01/08/2025, E32 01/08/2026. **Antes de out/2011 as métricas energéticas devolvem
+`n/d`**: a mistura oscilou entre 20% e 25% com datas que não foram confirmadas em
+fonte primária, e o indicador é linear no teor — um chute ali seria número
+inventado. A ANP publica "Gasolina C" sem separar comum de premium (que ficou em
+25%), o que empurra o teor efetivo para baixo em décimos de ponto.
+
+### Concentração por UF
+
+O HHI nacional de set/2026 é **1.142** pontos, com CR4 de 59,5% — faixa de
+mercado *não concentrado*. Só que ninguém compra combustível no mercado
+nacional. O mesmo índice por UF de destino, nos mesmos dados:
+
+| UF | HHI | CR4 | Agentes |
+|---|---|---|---|
+| AP | 4.853 | 99,8% | 5 |
+| AM | 3.953 | 92,5% | 6 |
+| AC | 2.868 | 93,8% | 5 |
+| SE | 2.759 | 88,0% | 18 |
+| ... | | | |
+| GO | 890 | — | — |
+
+Mediana de 1.660, quatro UFs acima de 2.500 (faixa de alta concentração). O
+número nacional não está errado; está medindo outra coisa. HHI e CR4 ficam
+juntos porque erram de formas diferentes: quatro agentes de 25% e um de 60%
+cercado de pequenos dão HHI parecido e CR4 bem distinto.
+
+Em toda leitura de concentração, duas ressalvas que o painel repete na tela:
+**agente regulado ≠ grupo econômico** (grupo com duas razões sociais conta como
+dois, então todo HHI aqui é *piso* da concentração real), e a UF é a de
+**destino declarado**, não o ponto de venda.
+
+### Cruzamento de duas dimensões
+
+A margem de uma dimensão já somou todas as outras, então "VIBRA em SP" não sai
+de "VIBRA" com "SP" — precisa das 725 mil linhas do cubo completo. São 2,1 MB,
+buscados **quando o usuário clica**, não no boot: a tela abre com 229 KB de
+cubos marginais, e quem só quer a série mensal nunca paga por isso. A mesma
+carga sob demanda serve a concentração por UF. O CSV sai com `;`, decimal `,` e
+BOM, para abrir no Excel em pt-BR sem caixa de diálogo.
+
 ## Leitura do dashboard
 
 - **Média móvel 12m** sobre o gráfico mensal — a série bruta é dominada por
@@ -183,6 +299,27 @@ pytest                       # travas de integridade e resumo do e-mail
 ruff check .
 python -m http.server 8000   # e abrir http://localhost:8000
 ```
+
+Painel novo:
+
+```bash
+cd web
+npm install
+npm run typecheck            # tsc, strict + noUncheckedIndexedAccess
+npm test                     # vitest: métricas, formato do cubo e canário
+npm run build                # gera web/dist (o painel.yml publica em painel/)
+npm run dev                  # servidor de desenvolvimento
+```
+
+Os três entram no CI do pull request. Antes disso um erro de TypeScript passava
+no PR e só quebrava depois do merge, na build do `painel.yml`.
+
+O canário `web/src/artefato.test.ts` lê o `data/` versionado e reconcilia a soma
+do cubo completo, mês a mês, com cada um dos quatro cubos marginais: são cinco
+caminhos independentes para o mesmo total. É a trava que pega o Python que
+*escreve* e o TypeScript que *lê* discordando sobre largura de coluna, ordem de
+campo ou escala — divergência que passa nos dois lados isoladamente e só
+apareceria no painel, como número errado sem erro na tela.
 
 Abrir o `index.html` direto do disco não funciona: o navegador bloqueia o
 `data.js` por `file://`. A página avisa isso em vez de ficar em branco.
