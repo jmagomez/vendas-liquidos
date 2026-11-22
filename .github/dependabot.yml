@@ -11,3 +11,20 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+
+  # O painel (web/) nao era vigiado por ninguem: react, vite, typescript,
+  # vitest e recharts envelheciam sem PR nenhum. O recharts ficou em 2.15.4,
+  # numa branch que o proprio npm declara descontinuada, ate o aviso aparecer
+  # por acaso num log de CI. Agrupado para nao abrir cinco PRs por semana.
+  - package-ecosystem: npm
+    directory: "/web"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      painel:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
