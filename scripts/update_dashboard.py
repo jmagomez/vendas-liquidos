@@ -4,6 +4,7 @@ UF de destino, mercado destinatário e produto, e grava data.js compacto."""
 import csv
 import hashlib
 import io
+import random
 import statistics
 import time
 import zipfile
@@ -29,9 +30,29 @@ OUT = BASE / "data.js"
 # numero publicado e exige decisao humana registrada (ver scripts/agentes.py).
 ALIASES = Path(__file__).resolve().parent / "aliases_agentes.json"
 
-TENTATIVAS = 4
-ESPERA_BASE = 10.0  # segundos; dobra a cada tentativa
-TIMEOUT = 300       # o arquivo tem ~200 MB; 300s cobre folgado uma ANP lenta
+# --- Politica de retry do download -----------------------------------------
+# Os runs #24 e #25 (2026-11-22) morreram em 2m44s cada, as OITO tentativas com
+# `ConnectionResetError(104)` no zip E na URL direta: o servidor da ANP estava
+# derrubando a conexao, nao devolvendo erro. A politica antiga — 4 tentativas,
+# backoff 10/20/40 — gastava 70 segundos de espera e desistia. Para uma origem
+# que cai por minutos ou horas, 70 segundos nao e paciencia, e so um numero.
+#
+# A politica agora e por ORCAMENTO DE TEMPO, nao por contagem: tenta ate gastar
+# `ORCAMENTO` de relogio ou esgotar `TENTATIVAS`, o que vier primeiro. O teto
+# existe porque o job tem `timeout-minutes: 45` — estourar o relogio do runner
+# mataria a rotina sem e-mail de falha e sem log legivel, que e pior do que
+# falhar rapido.
+TENTATIVAS = 8
+ESPERA_BASE = 15.0        # segundos; dobra a cada tentativa
+ESPERA_MAX = 180.0        # teto por espera: dobrar sem teto vira ociosidade
+JITTER = 0.25             # +/- 25% para os dois crons nao baterem em sincronia
+ORCAMENTO = 25 * 60       # relogio total de tentativas, contra os 45 min do job
+
+# (conexao, leitura). O timeout unico de 300s era o de LEITURA tambem na
+# conexao: com a origem fora do ar, cada tentativa segurava 5 minutos antes de
+# desistir, e 8 tentativas assim estourariam o job. 30s para conectar e
+# generoso para um servidor vivo e rapido para um morto.
+TIMEOUT = (30, 300)
 HEADERS = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                           "AppleWebKit/537.36 (KHTML, like Gecko) "
                           "Chrome/126.0 Safari/537.36")}
@@ -41,6 +62,41 @@ def _get(url):
     r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
     r.raise_for_status()
     return r.content
+
+
+def espera_da_tentativa(tentativa: int, aleatorio=random.random) -> float:
+    """Backoff exponencial com teto e jitter, em segundos.
+
+    `tentativa` e 1-based e conta a ESPERA ANTES dela: a primeira nao espera.
+    O jitter existe porque dois crons (dias 5 e 28) mais um dispatch manual
+    podem cair na mesma janela; sem ele, as tentativas de todos batem no mesmo
+    segundo e a origem ja fragilizada leva tres rajadas sincronizadas.
+    """
+    if tentativa <= 1:
+        return 0.0
+    bruta = min(ESPERA_BASE * 2 ** (tentativa - 2), ESPERA_MAX)
+    return bruta * (1 + JITTER * (2 * aleatorio() - 1))
+
+
+def classificar_falha(exc: BaseException) -> str:
+    """Nome curto do MODO de falha, para o log dizer o que houve.
+
+    "indisponivel apos N tentativas" nao distingue origem fora do ar de URL
+    que mudou — e a reacao e oposta: esperar, contra ir olhar o site. Estes
+    rotulos aparecem no log de cada tentativa e no erro final.
+    """
+    if isinstance(exc, requests.HTTPError):
+        codigo = getattr(getattr(exc, "response", None), "status_code", "?")
+        return f"http {codigo}"
+    if isinstance(exc, requests.ConnectTimeout):
+        return "timeout de conexao"
+    if isinstance(exc, requests.ReadTimeout):
+        return "timeout de leitura"
+    if isinstance(exc, requests.ConnectionError):
+        # Inclui o ConnectionResetError(104) dos runs #24 e #25.
+        return ("conexao derrubada pela origem"
+                if "reset by peer" in str(exc).lower() else "falha de conexao")
+    return type(exc).__name__
 
 
 def _extrair_do_zip(blob):
@@ -61,30 +117,64 @@ def _extrair_do_zip(blob):
     return [(n, zf.read(n)) for n in achados]
 
 
-def baixar():
+def _interpretar(blob):
+    """Zip ou CSV, decidido pelos BYTES e nao pela URL que os devolveu.
+
+    As duas URLs ja devolveram as duas coisas: a do zip pode responder o CSV
+    direto, e a "do CSV" e um caminho dentro do proprio .zip, que o servidor
+    pode servir como o pacote inteiro. Decidir pela URL e confiar no rotulo;
+    o magico `PK` e o dado. Sem isto, bytes de zip chegariam ao parser de CSV
+    e a rotina morreria dizendo "campo nao numerico" — erro verdadeiro,
+    diagnostico inutil.
+    """
+    if blob[:2] == b"PK":
+        return _extrair_do_zip(blob)
+    # CSV solto: so o _Atual, que hoje cobre 33 meses. Nao da para sustentar a
+    # serie com ele sozinho; quem barra e o teto de meses herdados, com
+    # mensagem explicita.
+    return [(ALVO_CSV, blob)]
+
+
+def baixar(dormir=time.sleep, agora=time.monotonic, aleatorio=random.random):
     """Baixa o CSV: preferindo o pacote liquidos.zip; fallback na URL direta.
-    Retry com backoff exponencial."""
-    ultima_falha = None
-    for tentativa in range(TENTATIVAS):
-        if tentativa:
-            espera = ESPERA_BASE * 2 ** (tentativa - 1)
-            print(f"[update] tentativa {tentativa + 1}/{TENTATIVAS} em {espera:.0f}s ({ultima_falha})")
-            time.sleep(espera)
+
+    Tenta ate gastar ORCAMENTO de relogio ou TENTATIVAS, o que vier primeiro.
+    Nao espera uma vez que a proxima espera nao caberia no orcamento: dormir
+    para depois desistir e so atrasar o e-mail de falha.
+
+    `dormir`, `agora` e `aleatorio` sao injetaveis para o teste poder provar a
+    politica sem gastar 25 minutos de relogio de verdade.
+    """
+    limite = agora() + ORCAMENTO
+    modos, ultima_falha = [], None
+    for tentativa in range(1, TENTATIVAS + 1):
+        espera = espera_da_tentativa(tentativa, aleatorio)
+        if espera:
+            if agora() + espera >= limite:
+                ultima_falha = (f"{ultima_falha} | orcamento de "
+                                f"{ORCAMENTO // 60} min esgotado")
+                break
+            print(f"[update] tentativa {tentativa}/{TENTATIVAS} em "
+                  f"{espera:.0f}s ({ultima_falha})", flush=True)
+            dormir(espera)
         try:
-            blob = _get(URL_ZIP)
-            if blob[:2] == b"PK":          # é zip: extrai os membros
-                return _extrair_do_zip(blob)
-            # Servidor devolveu o CSV direto: so o _Atual, que hoje cobre
-            # 33 meses. Nao da para sustentar a serie com ele sozinho; quem
-            # barra e o teto de meses herdados, com mensagem explicita.
-            return [(ALVO_CSV, blob)]
+            return _interpretar(_get(URL_ZIP))
         except Exception as exc:
-            ultima_falha = f"zip: {str(exc)[:120]}"
+            modos.append(classificar_falha(exc))
+            ultima_falha = f"zip: {classificar_falha(exc)}: {str(exc)[:100]}"
         try:
-            return [(ALVO_CSV, _get(URL_CSV))]
+            return _interpretar(_get(URL_CSV))
         except Exception as exc:
-            ultima_falha = f"{ultima_falha} | csv: {str(exc)[:120]}"
-    raise RuntimeError(f"ANP indisponível após {TENTATIVAS} tentativas ({ultima_falha})")
+            modos.append(classificar_falha(exc))
+            ultima_falha = (f"{ultima_falha} | csv: {classificar_falha(exc)}: "
+                            f"{str(exc)[:100]}")
+        if agora() >= limite:
+            ultima_falha = f"{ultima_falha} | orcamento esgotado"
+            break
+    resumo = ", ".join(f"{m} x{modos.count(m)}" for m in dict.fromkeys(modos))
+    raise RuntimeError(
+        f"ANP indisponível: {len(modos)} requisição(ões) falharam em "
+        f"{agora() - (limite - ORCAMENTO):.0f}s [{resumo}]. Última: {ultima_falha}")
 
 
 # Posicoes das colunas no CSV da ANP. A ANP nao documenta um layout estavel,
