@@ -1,6 +1,6 @@
 name: Constroi o painel novo (Vite)
 
-# O bundle tem ~650 KB e e GERADO: nao entra no repositorio pela mao de
+# O bundle tem ~740 KB e e GERADO: nao entra no repositorio pela mao de
 # ninguem. Este workflow compila web/ e commita o resultado em painel/, que o
 # GitHub Pages serve ao lado do painel antigo -- da para comparar os dois antes
 # de trocar a raiz.
@@ -34,9 +34,9 @@ jobs:
         with:
           node-version: "22"
 
-      # Sem package-lock.json no repositorio: as versoes diretas estao fixadas
-      # (sem ^) no package.json, o que da reprodutibilidade das dependencias
-      # diretas. Transitivas podem variar -- e o preco de nao versionar o lock.
+      # TEMPORARIO: `npm install` aqui existe so para GERAR o package-lock.json
+      # que ainda nao esta versionado. O passo de publicacao o commita junto, e
+      # na sequencia este passo vira `npm ci`.
       - name: Instala e constroi
         working-directory: web
         run: |
@@ -50,7 +50,7 @@ jobs:
           cp -r web/dist/. painel/
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add painel
+          git add painel web/package-lock.json
           if git diff --cached --quiet; then
             echo "::notice::painel/ sem alteracao — nada a commitar."
             exit 0
