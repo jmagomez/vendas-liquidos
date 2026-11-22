@@ -33,14 +33,17 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
-      # TEMPORARIO: `npm install` aqui existe so para GERAR o package-lock.json
-      # que ainda nao esta versionado. O passo de publicacao o commita junto, e
-      # na sequencia este passo vira `npm ci`.
+      # `npm ci` instala exatamente a arvore do lock e FALHA se o lock e o
+      # package.json discordarem. Com `npm install` o bundle publicado nao era
+      # funcao so do codigo: as versoes diretas estavam fixadas, mas as
+      # TRANSITIVAS podiam mudar entre duas rodadas do mesmo commit.
       - name: Instala e constroi
         working-directory: web
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm run build
 
       - name: Publica em painel/
@@ -50,7 +53,7 @@ jobs:
           cp -r web/dist/. painel/
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add painel web/package-lock.json
+          git add painel
           if git diff --cached --quiet; then
             echo "::notice::painel/ sem alteracao — nada a commitar."
             exit 0
