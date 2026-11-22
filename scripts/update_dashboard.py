@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import agentes as mod_agentes
+import cobertura as mod_cobertura
 import data_js
 import leitura
 import membros as mod_membros
@@ -325,6 +326,10 @@ def agregar_membros(membros, stats: dict | None = None):
             encoding=(next(iter(encodings.values()), None)
                       if len(encodings) == 1 else encodings),
             cobertura={n: [m[0], m[-1]] for n, m in cobertura.items()},
+            # Nome do arquivo que promete mais do que entrega. O caso real:
+            # `Historico_2007_a_2017.csv` para em 2016-12, e e por isso que 2017
+            # deixou de ser reproduzivel a partir do zip de hoje.
+            divergencias_de_rotulo=mod_membros.divergencias_de_rotulo(cobertura),
         )
     return agg
 
@@ -454,6 +459,16 @@ def conferir_meses_fechados(novo, anterior):
         )
 
 
+# "NI" (nao informado) e um valor da coluna de UF de destino, mas nao e um
+# estado: e o destino que o declarante nao informou. Sao 0,5% do volume da
+# serie -- pouco para somar a um estado qualquer, muito para calar. Em 2009
+# chega a ficar NEGATIVO no ano (estorno sem venda correspondente no mesmo
+# rotulo), o que num ranking de UFs apareceria como um estado de volume
+# negativo. Fica nos dados, fora do mapa: o painel o separa do ranking
+# geografico e mostra o volume dele a parte.
+UFS_NAO_GEOGRAFICAS = ("NI",)
+
+
 def gerar_data_js(agg, fonte: dict | None = None):
     parciais = classificar_meses(agg)
     months = sorted({k[0] for k in agg})
@@ -479,6 +494,11 @@ def gerar_data_js(agg, fonte: dict | None = None):
             # nenhum deles como manchete.
             "parciais": parciais,
             "ultimo_completo": completos[-1] if completos else None,
+            # Janela em que somar os quatro produtos e legitimo. Ver
+            # scripts/cobertura.py: o diesel so entra na fonte em 2010.
+            "cobertura": mod_cobertura.analisar(agg, months, parciais),
+            # Valores da coluna de UF que nao sao estados (hoje: "NI").
+            "ufs_nao_geograficas": [u for u in UFS_NAO_GEOGRAFICAS if u in ufs],
             # Proveniencia: qual arquivo da ANP produziu estes numeros. Sem isso
             # nao da para reproduzir nem auditar uma rodada passada -- e quando
             # um numero do painel for contestado, a pergunta vai ser exatamente
@@ -564,7 +584,19 @@ def main():
     print(f"[update] fonte sha256:{fonte['sha256']} ({fonte['bytes']:,} bytes)")
     data = gerar_data_js(agg, fonte)
     data["herdados"] = herdados
+    cob = data["cobertura"]
+    print(f"[update] janela comparavel: {cob['inicio_comparavel']} em diante "
+          "(todos os produtos cobertos)")
+    for prod, d in sorted(cob["por_produto"].items()):
+        if "razao" in d:
+            print(f"[update]   {prod}: a fonte so cobre a partir de {d['inicio']} "
+                  f"({d['antes_12m']:,.0f} -> {d['depois_12m']:,.0f} mil m3 em 12 meses)")
+    for d in (fonte.get("divergencias_de_rotulo") or []):
+        print(f"[update] rotulo divergente: {d['membro']} promete "
+              f"{d['declarado'][0]}..{d['declarado'][1]} e entrega "
+              f"{d['real'][0]}..{d['real'][1]} ({len(d['faltando'])} mes(es) ausentes)")
     conferir_contra_anterior(data, anterior)   # levanta antes de escrever
+    mod_cobertura.conferir_contra_anterior(cob, anterior)
     escrever_data_js(data)
 
     parciais = set(data["parciais"])
