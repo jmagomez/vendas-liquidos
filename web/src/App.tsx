@@ -7,7 +7,7 @@ import {
   NOME_DIM, carregar, rotulos, type Dados, type Dimensao,
 } from "./dados";
 import {
-  fmt, fmt1, fmtPct, hhi, mediaMovel12, mesCurto, porMesECategoria,
+  fmt, fmt1, fmtPct, formatador, hhi, mediaMovel12, mesCurto, porMesECategoria,
   serieDaCategoria, totalPorMes, variacaoAnual,
 } from "./financeiro";
 import { cr, otto } from "./setor";
@@ -258,7 +258,7 @@ export default function App() {
             <CartesianGrid stroke={GRADE} />
             <XAxis dataKey="mes" {...EIXO} minTickGap={40} />
             <YAxis {...EIXO} tickFormatter={(v: number) => fmt.format(v)} />
-            <Tooltip {...tooltip} formatter={(v: number) => fmt1.format(v)} />
+            <Tooltip {...tooltip} formatter={formatador((v) => fmt1.format(v))} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
             <Bar dataKey="v" name="Vendas" fill="#58a6ff">
               {serieChart.map((p, i) => (
@@ -279,7 +279,7 @@ export default function App() {
             <CartesianGrid stroke={GRADE} />
             <XAxis dataKey="mes" {...EIXO} minTickGap={40} />
             <YAxis {...EIXO} tickFormatter={(v: number) => `${fmt.format(v)}%`} />
-            <Tooltip {...tooltip} formatter={(v: number) => `${fmtPct.format(v)}%`} />
+            <Tooltip {...tooltip} formatter={formatador((v) => `${fmtPct.format(v)}%`)} />
             <Bar dataKey="yoy" name="Variação a/a">
               {serieChart.map((p, i) => (
                 <Cell key={i} fill={(p.yoy ?? 0) >= 0 ? "#3fb950" : "#f85149"} />
@@ -313,7 +313,7 @@ export default function App() {
               <CartesianGrid stroke={GRADE} />
               <XAxis dataKey="mes" {...EIXO} minTickGap={40} />
               <YAxis {...EIXO} tickFormatter={(v: number) => `${fmt.format(v)}%`} />
-              <Tooltip {...tooltip} formatter={(v: number) => `${fmtPct.format(v)}%`} />
+              <Tooltip {...tooltip} formatter={formatador((v) => `${fmtPct.format(v)}%`)} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               <Area type="monotone" dataKey="etanol" name="Etanol total (energia)"
                     stroke="#3fb950" fill="rgba(63,185,80,.15)" connectNulls={false} />
@@ -373,12 +373,15 @@ export default function App() {
       <Painel titulo="Concentração (HHI e CR4) ao longo do tempo" nota="Por agente regulado, mês a mês. Agente regulado ≠ grupo econômico: grupos com mais de uma razão social aparecem separados, então este HHI é um piso da concentração real.">
         <ResponsiveContainer width="100%" height={240}>
           <ComposedChart data={serieHhi}>
-            <CartesianGrid stroke={GRADE} />
+            {/* `yAxisId` obrigatorio aqui: o recharts 3 amarra a grade a um eixo
+                especifico, e este grafico nao tem o eixo padrao (0) -- so "h" e
+                "c". Sem isto a grade simplesmente nao desenha, calada. */}
+            <CartesianGrid stroke={GRADE} yAxisId="h" />
             <XAxis dataKey="mes" {...EIXO} minTickGap={40} />
             <YAxis yAxisId="h" {...EIXO} tickFormatter={(v: number) => fmt.format(v)} />
             <YAxis yAxisId="c" orientation="right" {...EIXO} domain={[0, 100]}
                    tickFormatter={(v: number) => `${fmt.format(v)}%`} />
-            <Tooltip {...tooltip} formatter={(v: number) => fmt1.format(v)} />
+            <Tooltip {...tooltip} formatter={formatador((v) => fmt1.format(v))} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
             <Area yAxisId="h" type="monotone" dataKey="hhi" name="HHI (pontos)"
                   stroke="#a371f7" fill="rgba(163,113,247,.18)" />
@@ -396,7 +399,7 @@ export default function App() {
             <CartesianGrid stroke={GRADE} />
             <XAxis type="number" {...EIXO} tickFormatter={(v: number) => fmt.format(v)} />
             <YAxis type="category" dataKey="nome" {...EIXO} width={40} />
-            <Tooltip {...tooltip} formatter={(v: number) => fmt.format(v)} />
+            <Tooltip {...tooltip} formatter={formatador((v) => fmt.format(v))} />
             <Bar dataKey="v" name="mil m³" fill="#58a6ff" />
           </BarChart>
         </ResponsiveContainer>
@@ -459,7 +462,7 @@ function Mix({ dados, nomes }: { dados: Record<string, number | string>[]; nomes
         <CartesianGrid stroke={GRADE} />
         <XAxis dataKey="mes" {...EIXO} minTickGap={40} />
         <YAxis {...EIXO} tickFormatter={(v: number) => `${Math.round(v * 100)}%`} />
-        <Tooltip {...tooltip} formatter={(v: number) => `${fmtPct.format(v)}%`} />
+        <Tooltip {...tooltip} formatter={formatador((v) => `${fmtPct.format(v)}%`)} />
         <Legend wrapperStyle={{ fontSize: 11 }} />
         {nomes.map((nome, i) => (
           <Area key={nome} type="monotone" dataKey={nome} stackId="1"
