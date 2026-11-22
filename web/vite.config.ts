@@ -8,5 +8,8 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   base: "/vendas-liquidos/painel/",
   plugins: [react()],
-  build: { outDir: "dist", sourcemap: false, chunkSizeWarningLimit: 700 },
+  // O limite e tripwire de crescimento, nao enfeite: o bundle foi de 683 KB
+  // (recharts 2) para 738 KB (recharts 3), e 800 deixa folga para uma secao
+  // nova sem transformar o aviso em ruido permanente que ninguem le.
+  build: { outDir: "dist", sourcemap: false, chunkSizeWarningLimit: 800 },
 });

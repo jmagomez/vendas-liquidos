@@ -8,6 +8,7 @@
  * mes normal. Um mes com 0,6% da amostra nao e um ponto baixo da serie; e um
  * ponto de outra serie.
  */
+import type { ReactNode } from "react";
 import { ESCALA, type Marginal } from "./dados";
 
 /** Serie total por mes (mil m3), a partir de qualquer cubo marginal. */
@@ -96,4 +97,21 @@ const MESES = ["jan", "fev", "mar", "abr", "mai", "jun",
 export function mesCurto(ym: string): string {
   const [a, m] = ym.split("-");
   return `${MESES[Number(m) - 1]}/${a}`;
+}
+
+/**
+ * Adapta um formatador numerico a assinatura do `formatter` do Tooltip.
+ *
+ * O recharts 3 passa `ValueType | undefined` -- numero, texto, lista ou nada.
+ * Escrever `(v: number) => ...` em cada grafico era uma mentira de tipo que a
+ * v2 aceitava calada: num ponto sem dado (mes nao consolidado, MM12 nula) o
+ * valor chega `undefined` e `Intl.NumberFormat.format(undefined)` devolve
+ * "NaN" na tela. Aqui isso vira o travessao de "sem valor", que e o que a
+ * serie de fato diz.
+ */
+export function formatador(f: (v: number) => string) {
+  // `readonly` de proposito: e o que o recharts 3 declara, e um array mutavel
+  // aqui nao aceitaria o tipo dele.
+  return (v: number | string | readonly (number | string)[] | undefined): ReactNode =>
+    typeof v === "number" ? f(v) : v == null ? "—" : String(v);
 }
