@@ -1,0 +1,52 @@
+# Copie este arquivo para .github/workflows/sincronizar-convencoes.yml no
+# repositorio de destino. Ele e de proposito um involucro fino: toda a logica
+# mora em jmagomez/convencoes-claude, que pode ser corrigido pela API. Arquivo
+# dentro de .github/workflows/ so se edita pelo editor web do GitHub (o token
+# do App devolve 403 por falta do escopo workflow), entao quanto menos ele
+# mudar, melhor.
+name: Sincronizar convencoes (CLAUDE.md)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Segunda-feira, 05h17 BRT (08h17 UTC). Minuto quebrado de proposito:
+    # cron na hora cheia disputa fila com metade do GitHub.
+    - cron: "17 8 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sincronizar-convencoes
+  cancel-in-progress: false
+
+jobs:
+  sincronizar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trazer o repositorio canonico
+        uses: actions/checkout@v4
+        with:
+          repository: jmagomez/convencoes-claude
+          ref: main
+          path: .convencoes
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Comparar e escrever
+        id: sync
+        run: python .convencoes/sincronizar.py
+
+      - name: Abrir PR
+        if: steps.sync.outputs.mudou == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BASE: ${{ github.event.repository.default_branch }}
+          RESUMO: ${{ steps.sync.outputs.resumo }}
+        run: bash .convencoes/abrir_pr.sh
