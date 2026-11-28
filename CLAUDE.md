@@ -202,3 +202,12 @@ versionada. O dependabot vigia `pip`, `github-actions` e o `npm` de `/web`.
 - Teste novo explica **por que existe**, de preferência citando o incidente que
   o motivou. A suíte deste repositório é um registro de falhas reais, não um
   exercício de cobertura.
+
+## Convenções comuns a todos os pipelines
+
+@CONVENCOES-COMUNS.md
+
+Esse arquivo é uma cópia sincronizada de
+https://github.com/jmagomez/convencoes-claude. Não edite a cópia daqui: a
+próxima sincronização a sobrescreve sem avisar. Mude a fonte, e o workflow
+"Sincronizar convenções" traz a mudança de volta.
